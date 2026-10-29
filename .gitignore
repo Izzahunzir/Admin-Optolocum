@@ -46,3 +46,11 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Firebase Admin SDK setup
+admin-setup/node_modules/
+
+# Private credentials
+admin-setup/*service-account*.json
+admin-setup/*private-key*.json
+admin-setup/application_default_credentials.json

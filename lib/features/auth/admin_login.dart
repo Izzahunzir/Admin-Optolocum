@@ -1,6 +1,8 @@
 
 import 'package:flutter/material.dart';
 import 'admin_forgotpassword.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../admin/admin_dashboard.dart';
 
 class AdminLoginPage extends StatefulWidget {
   const AdminLoginPage({super.key});
@@ -14,6 +16,83 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
   final passwordController = TextEditingController();
 
   bool obscurePassword = true;
+
+  bool isLoading = false;
+
+    Future<void> loginAdmin() async {
+      final email = emailController.text.trim();
+      final password = passwordController.text;
+
+      if (email.isEmpty || password.isEmpty) {
+        showMessage('Please enter your email and password.');
+      return;
+      }
+
+        setState(() => isLoading = true);
+
+      try {
+      final credential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(
+        email: email,
+        password: password,
+        );
+
+    // Refresh token to retrieve latest custom claims.
+    final tokenResult =
+        await credential.user!.getIdTokenResult(true);
+
+    final isAdmin = tokenResult.claims?['admin'] == true;
+
+    if (!isAdmin) {
+      await FirebaseAuth.instance.signOut();
+
+      if (!mounted) return;
+      showMessage('Access denied. Admin account required.');
+      return;
+    }
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => const AdminDashboardPage(),
+      ),
+      (route) => false,
+    );
+  } on FirebaseAuthException catch (e) {
+    if (!mounted) return;
+
+    switch (e.code) {
+      case 'invalid-email':
+        showMessage('Invalid email address.');
+        break;
+      case 'invalid-credential':
+      case 'wrong-password':
+      case 'user-not-found':
+        showMessage('Incorrect email or password.');
+        break;
+      case 'too-many-requests':
+        showMessage('Too many attempts. Try again later.');
+        break;
+      default:
+        showMessage('Login failed: ${e.message ?? e.code}');
+    }
+  } catch (e) {
+    if (!mounted) return;
+    showMessage('Something went wrong. Please try again.');
+  } finally {
+    if (mounted) {
+      setState(() => isLoading = false);
+    }
+  }
+}
+
+void showMessage(String message) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(message)),
+  );
+}
+
 
   static const Color headerColor = Color(0xFF5C8EA3);
   static const Color buttonColor = Color(0xFF263E50);
@@ -213,29 +292,41 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
                       const SizedBox(height: 22),
 
                       // Login Button
+                      
+                      // Login Button
                       SizedBox(
                         height: 48,
                         child: ElevatedButton(
-                          onPressed: () {
-                            // Firebase login later
-                          },
+                          onPressed: isLoading ? null : loginAdmin,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: buttonColor,
                             foregroundColor: Colors.white,
+                            disabledBackgroundColor: buttonColor,
+                            disabledForegroundColor: Colors.white70,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(6),
                             ),
                           ),
-                          child: const Text(
-                            'Login',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                          child: isLoading
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  'Login',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                      ),
+
 
                       const SizedBox(height: 14),
 
