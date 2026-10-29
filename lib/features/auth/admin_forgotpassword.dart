@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class AdminForgotPasswordPage extends StatefulWidget {
   const AdminForgotPasswordPage({super.key});
@@ -16,6 +17,54 @@ class _AdminForgotPasswordPageState
   static const headerColor = Color(0xFF5C8EA3);
   static const buttonColor = Color(0xFF263E50);
   static const backgroundColor = Color(0xFFF4F8FA);
+
+  bool isLoading = false;
+
+  Future<void> sendResetLink() async {
+    final email = emailController.text.trim();
+
+    if (email.isEmpty ||
+        !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      showMessage('Please enter a valid email address.');
+      return;
+    }
+
+    setState(() => isLoading = true);
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(
+        email: email,
+      );
+
+      if (!mounted) return;
+
+      showMessage(
+        'If this email is registered, a password reset link '
+        'will be sent. Please check your inbox or spam folder.',
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      if (e.code == 'too-many-requests') {
+        showMessage('Too many requests. Please try again later.');
+      } else {
+        showMessage('Unable to send reset link. Please try again.');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      showMessage('Something went wrong. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
+    }
+  }
+
+  void showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
 
   @override
   void dispose() {
@@ -66,9 +115,7 @@ class _AdminForgotPasswordPageState
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(
-                          alpha: 0.12,
-                        ),
+                        color: Colors.black.withValues(alpha: 0.12),
                         blurRadius: 20,
                         offset: const Offset(0, 8),
                       ),
@@ -76,8 +123,7 @@ class _AdminForgotPasswordPageState
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment:
-                        CrossAxisAlignment.stretch,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const Text(
                         'Forgot Password?',
@@ -109,18 +155,18 @@ class _AdminForgotPasswordPageState
                       const SizedBox(height: 8),
                       TextField(
                         controller: emailController,
-                        keyboardType:
-                            TextInputType.emailAddress,
+                        keyboardType: TextInputType.emailAddress,
+                        enabled: !isLoading,
+                        onSubmitted: (_) {
+                          if (!isLoading) sendResetLink();
+                        },
                         decoration: InputDecoration(
                           hintText: 'Enter admin email',
-                          prefixIcon: const Icon(
-                            Icons.email_outlined,
-                          ),
+                          prefixIcon: const Icon(Icons.email_outlined),
                           filled: true,
                           fillColor: Colors.white,
                           border: OutlineInputBorder(
-                            borderRadius:
-                                BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(6),
                             borderSide: BorderSide.none,
                           ),
                         ),
@@ -129,38 +175,45 @@ class _AdminForgotPasswordPageState
                       SizedBox(
                         height: 48,
                         child: ElevatedButton(
-                          onPressed: () {
-                            // Firebase password reset later
-                          },
+                          onPressed: isLoading ? null : sendResetLink,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: buttonColor,
                             foregroundColor: Colors.white,
+                            disabledBackgroundColor: buttonColor,
+                            disabledForegroundColor: Colors.white70,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(6),
                             ),
                           ),
-                          child: const Text(
-                            'Send Reset Link',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          child: isLoading
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text(
+                                  'Send Reset Link',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 14),
                       TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                        },
+                        onPressed: isLoading
+                            ? null
+                            : () => Navigator.pop(context),
                         child: const Text(
                           'Back to Login',
                           style: TextStyle(
                             color: Colors.white,
-                            decoration:
-                                TextDecoration.underline,
+                            decoration: TextDecoration.underline,
                             decorationColor: Colors.white,
                           ),
                         ),
