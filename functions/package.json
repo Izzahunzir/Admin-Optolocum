@@ -1,17 +1,26 @@
 {
-    "name":  "optolocum-account-management",
-    "private":  true,
-    "main":  "index.js",
-    "engines":  {
-                    "node":  "22"
-                },
-    "scripts":  {
-                    "test":  "node --test management.test.js local_app.test.js",
-                    "start:local":  "node local_server.js"
-                },
-    "dependencies":  {
-                         "express":  "^5.3.0",
-                         "firebase-admin":  "^14.5.0",
-                         "firebase-functions":  "^7.4.0"
-                     }
+  "name": "optolocum-account-management",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "test": "node --test management.test.js local_app.test.js emulator/safety.test.js",
+    "start:local": "node local_server.js",
+    "emulators:start": "node emulator/launch.js start",
+    "test:emulator": "node emulator/launch.js test",
+    "start:emulator": "node emulator/server.js",
+    "test:rules": "node emulator/launch.js rules"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase": "^13.1.0",
+    "google-auth-library": "11.3.2"
+  }
 }

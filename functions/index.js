@@ -13,6 +13,7 @@ exports.manageAccount = onCall({ region: 'asia-southeast1', concurrency: 1, maxI
     const bearer = request.rawRequest.headers.authorization;
     if (typeof bearer !== 'string' || !bearer.startsWith('Bearer ')) throw new HttpsError('unauthenticated', 'Please sign in again.');
     const actor = await getAuth().verifyIdToken(bearer.slice(7), true);
+    if (request.data?.action !== 'status') throw new HttpsError('failed-precondition', 'Account changes remain unavailable pending Firestore access protection.');
     const result = await manageAccount({ auth: getAuth(), db: getFirestore(), actor, data: request.data });
     if (request.data.action !== 'status') logger.info('Admin account action completed', { actorUid: actor.uid, targetUid: request.data.uid, action: request.data.action });
     return result;

@@ -161,7 +161,7 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
           ? 'Enable'
           : 'Disable';
       if (!await _confirm(account, action) || !mounted) return;
-      await _api.call(
+      final result = await _api.call(
         account.id,
         widget.kind,
         delete ? 'delete' : 'setDisabled',
@@ -173,7 +173,7 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
       if (delete) {
         _disabled.remove(account.id);
       } else {
-        _disabled[account.id] = !disabled;
+        _disabled[account.id] = result['disabled'] as bool;
       }
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$action completed.')));
@@ -208,6 +208,8 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
           Text(
             _api.baseUrl.isEmpty
                 ? 'Status source: Cloud Functions (local URL not configured)'
+                : _api.baseUrl == 'mock'
+                ? 'Status source: in-memory test backend'
                 : 'Status source: localhost (read-only)',
             style: const TextStyle(fontSize: 12, color: Colors.blueGrey),
           ),

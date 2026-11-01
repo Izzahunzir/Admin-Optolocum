@@ -154,3 +154,57 @@ not establish live credentials, production IAM permissions or success of the adm
 actual browser session. A live authenticated read is confirmed only after the actual
 signed-in Chrome request returns successfully. No Auth changes, Firestore writes,
 rules deployments or billing changes are part of this check.
+
+
+## Mock account-action development
+
+Production mutations remain blocked in Flutter, Express and the retained callable.
+Verification functionality is unchanged. No environment flag enables mutations.
+AccountManagementApi.mock uses an injected in-memory transport and synthetic token
+provider only; it never dispatches to HTTP or Cloud Functions. Never use this
+constructor in an application startup path.
+
+From the repository root run:
+
+    flutter analyze --no-pub
+    flutter test --no-pub test/account_management_test.dart test/account_management_workflow_test.dart
+
+From functions run npm.cmd test. Tests cover both profile kinds, confirmations,
+cancellation, typed UID, invalid requests, authorization, state conflicts and partial
+failures. Mutations are never automatically retried. An uncertain result clears the
+row status and requires refresh; a successful status read does not prove session
+revocation completed. Partial changes still require administrator recovery.
+
+### Next emulator integration phase
+
+1. Use Auth and Firestore emulators with demo-optolocum-account-management, synthetic
+   identities and no production credentials.
+2. Implement a separate emulator-only runner requiring both loopback emulator hosts
+   and a demo- project ID. Keep local_server.js unchanged: it rejects emulator hosts.
+3. Seed synthetic administrators, both non-admin profile kinds and dependency data.
+4. Add an emulator-only transport, keeping production mutation gates closed. Test
+   stale tokens, self/admin targets, recent login, expected state, typed UID,
+   dependency checks, the 61-minute waiting period and failure/retry recovery.
+5. Test Firestore lockout against the exact deployed-rules baseline plus reviewed
+   access protection; older sibling fixtures are not the production baseline.
+
+No mutation-capable HTTP emulator runner is provided yet. Mock tests do not prove
+Firestore lockout. Production activation still requires account access metadata,
+authentication-time rules, migration, trusted provisioning, durable coordination
+and recovery, and signup/query/listener regression tests. Do not deploy or migrate
+as part of this development workflow.
+
+
+## Phase 3: isolated emulator integration
+
+See [emulator/README.md](emulator/README.md) for the implemented demo-only runner,
+startup checks and integration tests. Production mutation gates remain closed.
+The earlier note that no emulator HTTP runner exists is superseded by Phase 3.
+
+
+## Phase 4: candidate access rules (blocked design stage)
+
+See [emulator/access/README.md](emulator/access/README.md) for the user-supplied
+production baseline, separate strict candidate, registration blocker and emulator
+rules tests. Run npm.cmd run test:rules from functions. No production deployment
+or mutation activation is authorized; immediate new-user provisioning is unresolved.

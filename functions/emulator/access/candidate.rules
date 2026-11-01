@@ -1,0 +1,148 @@
+// EMULATOR ONLY. Strict candidate; registration without trusted provisioning is BLOCKED.
+// User-supplied production baseline, 2026-11-01. Not retrieved from the live API.
+// Chat HTML spaces and Markdown escapes normalized; authorization logic preserved.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // BEGIN candidate-only access gate. No bootstrap or missing-metadata bypass.
+    function hasActiveSession() {
+      return request.auth != null && accessDocumentAllowsSession();
+    }
+    function accessDocumentAllowsSession() {
+      let access = get(/databases/$(database)/documents/account_access/$(request.auth.uid));
+      return access != null
+        && access.data.keys().hasAll(['state', 'validAfter', 'updatedAt', 'updatedBy', 'schemaVersion'])
+        && access.data.keys().hasOnly(['state', 'validAfter', 'updatedAt', 'updatedBy', 'schemaVersion'])
+        && access.data.schemaVersion is int && access.data.schemaVersion == 1
+        && access.data.state == 'active'
+        && access.data.validAfter is int && access.data.validAfter >= 0
+        && access.data.updatedAt is timestamp
+        && access.data.updatedBy is string && access.data.updatedBy.size() > 0
+        && request.auth.token.auth_time is int
+        && request.auth.token.auth_time > access.data.validAfter;
+    }
+    match /account_access/{uid} {
+      allow read, write: if false;
+    }
+    // END candidate-only access gate.
+
+    function isAdmin() {
+      return hasActiveSession() && request.auth.token.admin == true;
+    }
+    match /job_postings/{jobId} {
+      allow read: if hasActiveSession();
+      allow create: if hasActiveSession()
+        && request.resource.data.clinicOwnerId == request.auth.uid
+        && request.resource.data.status == 'available';
+      allow update, delete: if hasActiveSession()
+        && resource.data.clinicOwnerId == request.auth.uid
+        && request.resource.data.clinicOwnerId == resource.data.clinicOwnerId;
+      allow read, update, delete: if isAdmin();
+    }
+    match /applications/{applicationId} {
+      allow create: if hasActiveSession()
+        && request.resource.data.locumId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly([
+          'jobId', 'locumId', 'clinicOwnerId', 'status', 'appliedAt'
+        ])
+        && request.resource.data.jobId is string
+        && request.resource.data.clinicOwnerId is string
+        && applicationId == request.resource.data.jobId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/job_postings/$(request.resource.data.jobId))
+        && get(/databases/$(database)/documents/job_postings/$(request.resource.data.jobId)).data.status == 'available'
+        && get(/databases/$(database)/documents/job_postings/$(request.resource.data.jobId)).data.clinicOwnerId == request.resource.data.clinicOwnerId
+        && request.resource.data.clinicOwnerId != request.auth.uid
+        && request.resource.data.appliedAt == request.time;
+      allow get: if hasActiveSession()
+        && (applicationId.matches('.*_' + request.auth.uid)
+          || (resource != null && resource.data.clinicOwnerId == request.auth.uid));
+      allow list: if hasActiveSession()
+        && (resource.data.locumId == request.auth.uid || resource.data.clinicOwnerId == request.auth.uid);
+      allow update, delete: if false;
+      allow get, list: if isAdmin();
+    }
+    match /locum_profiles/{locumId} {
+      allow get: if hasActiveSession() && request.auth.uid == locumId;
+      allow list: if false;
+      allow create, update: if hasActiveSession()
+        && request.auth.uid == locumId
+        && request.resource.data.verificationStatus == 'pending';
+      allow delete: if false;
+      allow get, list: if isAdmin();
+    }
+    match /application_applicant_summaries/{applicationId} {
+      function applicationDocument() {
+        return get(/databases/$(database)/documents/applications/$(applicationId));
+      }
+      function jobBelongsToOwner(jobId, ownerId) {
+        let job = get(/databases/$(database)/documents/job_postings/$(jobId));
+        return job != null && job.data.get('clinicOwnerId', '') == ownerId;
+      }
+      function validRelationship(app) {
+        return app.keys().hasAll(['jobId', 'locumId', 'clinicOwnerId'])
+          && app.jobId is string && app.jobId.matches('^[^/]+$')
+          && app.locumId is string && app.locumId.matches('^[^/]+$')
+          && app.clinicOwnerId is string && app.clinicOwnerId.size() > 0
+          && applicationId == app.jobId + '_' + app.locumId
+          && app.locumId != app.clinicOwnerId
+          && jobBelongsToOwner(app.jobId, app.clinicOwnerId);
+      }
+      function validSummary(data) {
+        return data.keys().hasAll(['fullName', 'highestEducation', 'course'])
+          && data.keys().hasOnly(['fullName', 'highestEducation', 'course', 'verificationStatus'])
+          && data.fullName is string && data.highestEducation is string && data.course is string
+          && (!data.keys().hasAny(['verificationStatus'])
+            || (data.verificationStatus is string
+              && data.get('verificationStatus', 'unverified') in ['unverified', 'pending', 'verified']));
+      }
+      function profileText(profile, key) {
+        return profile.get(key, '') is string ? profile.get(key, '') : '';
+      }
+      function matchesOwnProfile() {
+        let profile = get(/databases/$(database)/documents/locum_profiles/$(request.auth.uid));
+        return profile != null
+          && request.resource.data.fullName == profileText(profile.data, 'fullName')
+          && request.resource.data.highestEducation == profileText(profile.data, 'highestEducation')
+          && request.resource.data.course == profileText(profile.data, 'course')
+          && (!request.resource.data.keys().hasAny(['verificationStatus'])
+            || request.resource.data.verificationStatus == profile.data.get('verificationStatus', 'unverified'));
+      }
+      function canPublishOwnSummary() {
+        let app = applicationDocument();
+        return app != null && validRelationship(app.data)
+          && app.data.locumId == request.auth.uid
+          && validSummary(request.resource.data) && matchesOwnProfile();
+      }
+      function canReadApplicantSummary() {
+        let app = applicationDocument();
+        return app != null && validRelationship(app.data) && app.data.clinicOwnerId == request.auth.uid;
+      }
+      allow get: if hasActiveSession() && canReadApplicantSummary()
+        && (resource == null || validSummary(resource.data));
+      allow create, update: if hasActiveSession() && canPublishOwnSummary();
+      allow list, delete: if false;
+      allow get, list: if isAdmin();
+    }
+    match /practice_owner_profiles/{ownerId} {
+      function validOwnerProfile() {
+        return request.resource.data.keys().hasAll([
+          'fullName', 'email', 'phoneNumber', 'role', 'verificationStatus', 'createdAt', 'updatedAt'
+        ])
+          && request.resource.data.keys().hasOnly([
+            'fullName', 'email', 'phoneNumber', 'role', 'verificationStatus', 'createdAt', 'updatedAt'
+          ])
+          && request.resource.data.fullName is string && request.resource.data.fullName.size() > 0
+          && request.resource.data.email is string && request.resource.data.email == request.auth.token.email
+          && request.resource.data.phoneNumber is string
+          && request.resource.data.role is string && request.resource.data.role in ['HR', 'Manager', 'Optical Owner']
+          && request.resource.data.verificationStatus == 'unverified'
+          && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      }
+      allow get: if hasActiveSession() && request.auth.uid == ownerId;
+      allow create: if hasActiveSession() && request.auth.uid == ownerId && validOwnerProfile();
+      allow get, list: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}

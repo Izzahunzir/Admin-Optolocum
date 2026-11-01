@@ -11,6 +11,8 @@ async function manageAccount({ auth, db, actor, data, now = Date.now() }) {
   const { uid, kind, action } = data || {};
   if (typeof uid !== 'string' || !uid || uid.length > 128 || uid.includes('/')) fail('invalid-argument', 'Invalid account ID.');
   if (!['locum', 'practice_owner'].includes(kind) || !['status', 'setDisabled', 'delete'].includes(action)) fail('invalid-argument', 'Invalid account action.');
+  const allowed = action === 'status' ? ['uid', 'kind', 'action'] : action === 'setDisabled' ? ['uid', 'kind', 'action', 'disabled', 'expectedDisabled'] : ['uid', 'kind', 'action', 'confirmUid'];
+  if (Object.keys(data).some(key => !allowed.includes(key))) fail('invalid-argument', 'Unexpected account request fields.');
   const caller = await auth.getUser(actor.uid);
   if (caller.disabled || caller.customClaims?.admin !== true) fail('permission-denied', 'Administrator access is no longer valid.');
   if (actor.uid === uid) fail('failed-precondition', 'You cannot manage your own account.');
@@ -20,18 +22,24 @@ async function manageAccount({ auth, db, actor, data, now = Date.now() }) {
   const profile = await db.collection(profilePath).doc(uid).get();
   if (!profile.exists) fail('not-found', 'The selected profile no longer exists.');
   if (action === 'status') return { disabled: target.disabled };
-  if (typeof actor.auth_time !== 'number' || now / 1000 - actor.auth_time > 300) fail('unauthenticated', 'Please sign out and sign in again before managing accounts.');
+  if (!Number.isFinite(actor.auth_time) || actor.auth_time > now / 1000 || now / 1000 - actor.auth_time > 300) fail('unauthenticated', 'Please sign out and sign in again before managing accounts.');
 
   if (action === 'setDisabled') {
     if (typeof data.disabled !== 'boolean' || typeof data.expectedDisabled !== 'boolean') fail('invalid-argument', 'Invalid account state.');
+    if (data.disabled === data.expectedDisabled) fail('invalid-argument', 'Account action must change the expected state.');
     if (target.disabled !== data.expectedDisabled) fail('aborted', 'Account status changed. Refresh it and try again.');
     const claims = { ...(target.customClaims || {}) };
     if (data.disabled) claims.accountDisabledAt = Math.floor(now / 1000);
     else delete claims.accountDisabledAt;
-    await auth.setCustomUserClaims(uid, claims);
-    await auth.updateUser(uid, { disabled: data.disabled });
-    // Revoke on both transitions so enabling never restores existing sessions.
-    await auth.revokeRefreshTokens(uid);
+    try {
+      await auth.setCustomUserClaims(uid, claims);
+      await auth.updateUser(uid, { disabled: data.disabled });
+      // Revoke on both transitions so enabling never restores existing sessions.
+      await auth.revokeRefreshTokens(uid);
+    } catch (_) {
+      // Auth operations are not atomic. Never report success or blindly retry.
+      fail('internal', 'Account change may be incomplete. Refresh status and request administrator recovery before retrying; session revocation is not confirmed.');
+    }
     return { disabled: data.disabled };
   }
 

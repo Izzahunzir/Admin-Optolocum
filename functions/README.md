@@ -48,3 +48,18 @@ App Check can be added after the web app has been registered/configured for it.
 `node --test management.test.js` tests the injected authorization/mutation core
 without connecting to a real Firebase project. Flutter tests verify confirmation,
 cancellation, Enable/Disable changes, and exact UID confirmation for deletion.
+
+
+## Phase 3: isolated emulator integration
+
+See [emulator/README.md](emulator/README.md) for the implemented demo-only runner,
+startup checks and integration tests. Production mutation gates remain closed.
+The earlier note that no emulator HTTP runner exists is superseded by Phase 3.
+
+
+## Phase 4: candidate access rules (blocked design stage)
+
+See [emulator/access/README.md](emulator/access/README.md) for the user-supplied
+production baseline, separate strict candidate, registration blocker and emulator
+rules tests. Run npm.cmd run test:rules from functions. No production deployment
+or mutation activation is authorized; immediate new-user provisioning is unresolved.

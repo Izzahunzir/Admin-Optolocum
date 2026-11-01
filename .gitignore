@@ -55,6 +55,7 @@ admin-setup/*service-account*.json
 admin-setup/*private-key*.json
 admin-setup/application_default_credentials.json
 functions/node_modules/
+functions/emulator/.runtime/
 
 # Local backend secrets must never be committed
 .env

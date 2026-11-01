@@ -16,13 +16,26 @@ class AccountManagementApi {
     this.client,
     this.tokenProvider,
     this.baseUrl = const String.fromEnvironment('ACCOUNT_API_BASE_URL'),
-  });
+  }) : _mockTransport = null;
+
+  /// In-memory testing only: this path never uses HTTP or Cloud Functions.
+  @visibleForTesting
+  AccountManagementApi.mock({
+    required Future<Map<String, dynamic>> Function(Map<String, dynamic>, String)
+    transport,
+    required this.tokenProvider,
+  }) : _mockTransport = transport,
+       client = null,
+       baseUrl = 'mock';
+
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic>, String)?
+  _mockTransport;
   final http.Client? client;
   final Future<String?> Function()? tokenProvider;
   final String baseUrl;
 
   // Phase 1 cannot be enabled by dart-define or a server response.
-  bool get accountChangesEnabled => false;
+  bool get accountChangesEnabled => _mockTransport != null;
 
   Future<Map<String, dynamic>> call(
     String uid,
@@ -32,13 +45,75 @@ class AccountManagementApi {
     bool? expectedDisabled,
     String? confirmUid,
   }) async {
-    if (action != 'status') {
+    if (action != 'status' && _mockTransport == null) {
       throw const AccountManagementException(
         'failed-precondition',
         'Account changes are disabled in Phase 1 pending security and Firestore session-access verification.',
       );
     }
     final data = <String, dynamic>{'uid': uid, 'kind': kind, 'action': action};
+    if (uid.isEmpty ||
+        uid.length > 128 ||
+        uid.contains('/') ||
+        !['locum', 'practice_owner'].contains(kind) ||
+        !['status', 'setDisabled', 'delete'].contains(action) ||
+        (action == 'status' &&
+            (disabled != null ||
+                expectedDisabled != null ||
+                confirmUid != null)) ||
+        (action == 'setDisabled' &&
+            (disabled == null ||
+                expectedDisabled == null ||
+                disabled == expectedDisabled ||
+                confirmUid != null)) ||
+        (action == 'delete' &&
+            (confirmUid != uid ||
+                disabled != null ||
+                expectedDisabled != null))) {
+      throw const AccountManagementException(
+        'invalid-argument',
+        'Invalid account request.',
+      );
+    }
+    if (action == 'setDisabled') {
+      data.addAll({'disabled': disabled, 'expectedDisabled': expectedDisabled});
+    }
+    if (action == 'delete') data['confirmUid'] = confirmUid;
+    if (_mockTransport != null) {
+      try {
+        final token = await tokenProvider!();
+        if (token == null || token.isEmpty) {
+          throw const AccountManagementException(
+            'unauthenticated',
+            'Please sign in as an administrator.',
+          );
+        }
+        final result = await _mockTransport(
+          data,
+          token,
+        ).timeout(const Duration(seconds: 20));
+        if (action == 'delete'
+            ? result['deleted'] != true
+            : result['disabled'] is! bool ||
+                  (action == 'setDisabled' && result['disabled'] != disabled)) {
+          throw const AccountManagementException(
+            'internal',
+            'Invalid response from the test backend.',
+          );
+        }
+        return result;
+      } on FirebaseAuthException {
+        throw const AccountManagementException(
+          'unauthenticated',
+          'Please sign out and sign in again.',
+        );
+      } on TimeoutException {
+        throw const AccountManagementException(
+          'unavailable',
+          'Account action timed out. Refresh status before retrying.',
+        );
+      }
+    }
     if (baseUrl.isEmpty) {
       try {
         final result = await FirebaseFunctions.instanceFor(
