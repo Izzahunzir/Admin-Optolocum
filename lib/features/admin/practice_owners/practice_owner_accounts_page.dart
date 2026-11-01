@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/account_table.dart';
+import '../account_management/managed_account_table.dart';
 import '../widgets/paginated_records.dart';
 import 'practice_owner_profile.dart';
 import 'practice_owner_service.dart';
@@ -50,10 +50,9 @@ class PracticeOwnerAccountsPage extends StatelessWidget {
           matches: (a, q) => '${a.id} ${a.name} ${a.email} ${a.phone}'
               .toLowerCase()
               .contains(q),
-          tableBuilder: (accounts) => AccountTable(
+          tableBuilder: (accounts) => ManagedAccountTable(
             accounts: accounts,
-            readOnly: true,
-            showRole: true,
+            kind: 'practice_owner',
             roleLabel: (account) => (account as PracticeOwnerProfile).role,
           ),
         ),

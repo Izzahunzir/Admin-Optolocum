@@ -6,7 +6,7 @@ import 'profile_registration_trend.dart';
 import '../locums/locum_service.dart';
 import '../practice_owners/practice_owner_service.dart';
 import '../job_postings/job_posting_service.dart';
-import '../widgets/account_record.dart';
+import 'account_verification_table.dart';
 
 const _teal = Color(0xFF3D7789);
 
@@ -151,57 +151,63 @@ class DashboardPage extends StatelessWidget {
                     errorMessage: locums.errorMessage ?? owners.errorMessage,
                     fromCache: locums.fromCache || owners.fromCache,
                   ),
+                  minHeight: 380,
                 ),
               ),
               SizedBox(
                 width: width >= 760 ? (width - 32) / 3 : width,
                 child: _panel(
                   'Job Posting Overview',
-                  Column(
-                    children: [
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 110,
-                        width: 110,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            SizedBox.expand(
-                              child: CircularProgressIndicator(
-                                value: postings.jobs.isEmpty
-                                    ? 0
-                                    : postings.availableCount /
-                                          postings.jobs.length,
-                                strokeWidth: 13,
-                                color: _teal,
+                  SizedBox(
+                    height: 300,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          height: 170,
+                          width: 170,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              SizedBox.expand(
+                                child: CircularProgressIndicator(
+                                  value: postings.jobs.isEmpty
+                                      ? 0
+                                      : postings.availableCount /
+                                            postings.jobs.length,
+                                  strokeWidth: 16,
+                                  color: _teal,
+                                ),
                               ),
-                            ),
-                            Text(
-                              postings.loading || postings.errorMessage != null
-                                  ? '—'
-                                  : '${postings.availableCount}',
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: _teal,
+                              Text(
+                                postings.loading ||
+                                        postings.errorMessage != null
+                                    ? '—'
+                                    : '${postings.availableCount}',
+                                style: const TextStyle(
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.bold,
+                                  color: _teal,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 28),
-                      Text(
-                        postings.loading
-                            ? 'Loading job postings…'
-                            : postings.errorMessage != null
-                            ? 'Job postings unavailable'
-                            : postings.fromCache
-                            ? 'Available postings (cached)'
-                            : 'Available postings',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ],
+                        const SizedBox(height: 28),
+                        Text(
+                          postings.loading
+                              ? 'Loading job postings…'
+                              : postings.errorMessage != null
+                              ? 'Job postings unavailable'
+                              : postings.fromCache
+                              ? 'Available postings (cached)'
+                              : 'Available postings',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
                   ),
+                  minHeight: 380,
                 ),
               ),
               SizedBox(
@@ -210,12 +216,27 @@ class DashboardPage extends StatelessWidget {
                   'Account Overview',
                   Column(
                     children: [
-                      _accountSummary('Locums', locums.profiles),
-                      const SizedBox(height: 20),
-                      _accountSummary('Practice owners', owners.accounts),
+                      AccountVerificationTable(
+                        locums: VerificationColumnData(
+                          statuses: locums.profiles.map(
+                            (p) => p.verificationStatus,
+                          ),
+                          loading: locums.loading,
+                          errorMessage: locums.errorMessage,
+                          fromCache: locums.fromCache,
+                        ),
+                        owners: VerificationColumnData(
+                          statuses: owners.accounts.map(
+                            (p) => p.verificationStatus,
+                          ),
+                          loading: owners.loading,
+                          errorMessage: owners.errorMessage,
+                          fromCache: owners.fromCache,
+                        ),
+                      ),
                       const SizedBox(height: 14),
                       const Text(
-                        'Account management is not connected',
+                        'Verification status only; not enabled/disabled account status.',
                         style: TextStyle(fontSize: 11, color: Colors.blueGrey),
                       ),
                     ],
@@ -299,62 +320,26 @@ class DashboardPage extends StatelessWidget {
     },
   );
 
-  Widget _panel(String title, Widget child) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: const Color(0xFFEDF5F8),
-      borderRadius: BorderRadius.circular(7),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+  Widget _panel(String title, Widget child, {double minHeight = 0}) =>
+      Container(
+        constraints: BoxConstraints(minHeight: minHeight),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEDF5F8),
+          borderRadius: BorderRadius.circular(7),
         ),
-        const SizedBox(height: 18),
-        child,
-      ],
-    ),
-  );
-
-  Widget _accountSummary(String label, List<AccountRecord> accounts) {
-    if (label == 'Locums') {
-      return Text(
-        locums.loading
-            ? 'Loading locum profiles…'
-            : locums.errorMessage != null
-            ? 'Locum profiles unavailable'
-            : '${accounts.length} locum profiles · Account status not available',
-        style: const TextStyle(fontSize: 12, color: Colors.blueGrey),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 18),
+            child,
+          ],
+        ),
       );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        LinearProgressIndicator(
-          value: 0,
-          color: _teal,
-          backgroundColor: const Color(0xFFD7E4EA),
-          minHeight: 8,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          owners.loading
-              ? 'Loading practice owner profiles…'
-              : owners.errorMessage != null
-              ? 'Practice owner profiles unavailable'
-              : '${accounts.length} profiles · Account status not available',
-          style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
-        ),
-      ],
-    );
-  }
 
   Widget _quickAction(String title, IconData icon, int destination) => Material(
     color: const Color(0xFFE0F1EF),

@@ -50,8 +50,8 @@ class ProfileRegistrationTrend extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         SizedBox(
-          height: 140,
-          child: loading
+          height: 220,
+          child: loading && errorMessage == null
               ? const Center(child: CircularProgressIndicator())
               : errorMessage != null
               ? Center(
@@ -71,18 +71,20 @@ class ProfileRegistrationTrend extends StatelessWidget {
                     for (int i = 0; i < 6; i++)
                       Tooltip(
                         message:
-                            '${names[trend.months[i].month - 1]} ${trend.months[i].year}: ${trend.counts[i]} profile creations${fromCache ? ' (cached)' : ''}',
+                            '${names[trend.months[i].month - 1]} ${trend.months[i].year}: ${fromCache && trend.counts[i] == 0 ? 'count unknown (cached)' : '${trend.counts[i]} profile creations${fromCache ? ' (cached)' : ''}'}',
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             Text(
-                              '${trend.counts[i]}',
+                              fromCache && trend.counts[i] == 0
+                                  ? '—'
+                                  : '${trend.counts[i]}',
                               style: const TextStyle(fontSize: 10),
                             ),
                             const SizedBox(height: 4),
                             Container(
-                              width: 16,
-                              height: trend.counts[i] / maximum * 95,
+                              width: 20,
+                              height: trend.counts[i] / maximum * 175,
                               decoration: BoxDecoration(
                                 color: const Color(0xFF3D7789),
                                 borderRadius: BorderRadius.circular(3),
@@ -110,7 +112,7 @@ class ProfileRegistrationTrend extends StatelessWidget {
           ),
           if (trend.unknownDates > 0)
             Text(
-              '${trend.unknownDates} profiles excluded: creation date unknown.',
+              '${trend.unknownDates} profiles excluded: creation date unknown. Historical data may be incomplete.',
               style: const TextStyle(fontSize: 10, color: Colors.blueGrey),
               textAlign: TextAlign.center,
             ),

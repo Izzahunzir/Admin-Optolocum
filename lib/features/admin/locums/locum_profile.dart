@@ -10,8 +10,10 @@ class LocumProfile extends AccountRecord {
     super.email,
     super.phone, {
     this.createdAt,
+    this.verificationStatus,
   });
   final DateTime? createdAt;
+  final Object? verificationStatus;
 
   factory LocumProfile.fromMap(String id, Map<String, dynamic> data) {
     String field(String key) {
@@ -26,6 +28,7 @@ class LocumProfile extends AccountRecord {
       field('fullName'),
       field('email'),
       field('phoneNumber'),
+      verificationStatus: data['verificationStatus'],
       createdAt: data['createdAt'] is Timestamp
           ? (data['createdAt'] as Timestamp).toDate()
           : null,

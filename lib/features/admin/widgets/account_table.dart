@@ -13,11 +13,16 @@ class AccountTable extends StatelessWidget {
     this.onToggle,
     this.onDelete,
     this.roleLabel,
+    this.canManage,
+    this.disabledFor,
+    this.statusLabel,
   });
   final List<AccountRecord> accounts;
   final bool showRole, readOnly;
   final ValueChanged<AccountRecord>? onToggle, onDelete;
   final String Function(AccountRecord)? roleLabel;
+  final bool Function(AccountRecord)? canManage, disabledFor;
+  final String Function(AccountRecord)? statusLabel;
   @override
   Widget build(BuildContext context) => AdminTable(
     headers: [
@@ -43,17 +48,35 @@ class AccountTable extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     accountAction(
-                      a.disabled ? 'Enable' : 'Disable',
+                      (disabledFor?.call(a) ?? a.disabled)
+                          ? 'Enable'
+                          : 'Disable',
                       Colors.orange,
-                      readOnly ? null : () => onToggle!(a),
+                      readOnly ||
+                              onToggle == null ||
+                              canManage?.call(a) == false
+                          ? null
+                          : () => onToggle!(a),
                     ),
                     const SizedBox(width: 8),
                     accountAction(
                       'Delete',
                       Colors.red,
-                      readOnly ? null : () => onDelete!(a),
+                      readOnly ||
+                              onDelete == null ||
+                              canManage?.call(a) == false
+                          ? null
+                          : () => onDelete!(a),
                     ),
-                    if (a.disabled)
+                    if (statusLabel != null)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Text(
+                          statusLabel!(a),
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      )
+                    else if (disabledFor?.call(a) ?? a.disabled)
                       const Padding(
                         padding: EdgeInsets.only(left: 8),
                         child: Text(

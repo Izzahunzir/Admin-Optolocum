@@ -54,3 +54,12 @@ admin-setup/node_modules/
 admin-setup/*service-account*.json
 admin-setup/*private-key*.json
 admin-setup/application_default_credentials.json
+functions/node_modules/
+
+# Local backend secrets must never be committed
+.env
+.env.*
+
+**/*service-account*.json
+**/*private-key*.json
+**/application_default_credentials.json
