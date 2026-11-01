@@ -104,16 +104,24 @@ void main() {
       await render(error: 'Access denied');
       expect(find.textContaining('Profile trend unavailable'), findsOneWidget);
       expect(find.text('Oct'), findsNothing);
+      await render(loading: true, error: 'Access denied');
+      expect(find.textContaining('Profile trend unavailable'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
       await render(cached: true);
       expect(find.text('Cached data · May be incomplete'), findsOneWidget);
       expect(
-        find.text('1 profiles excluded: creation date unknown.'),
+        find.text(
+          '1 profiles excluded: creation date unknown. Historical data may be incomplete.',
+        ),
         findsOneWidget,
       );
       expect(find.text('1'), findsOneWidget);
+      expect(find.text('0'), findsNothing);
+      expect(find.text('—'), findsNWidgets(5));
       expect(find.text('Oct'), findsOneWidget);
       await render();
       expect(find.text('Firestore profile creation counts'), findsOneWidget);
+      expect(find.text('0'), findsNWidgets(5));
       expect(tester.takeException(), isNull);
     },
   );

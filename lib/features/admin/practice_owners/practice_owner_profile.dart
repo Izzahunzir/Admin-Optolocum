@@ -11,9 +11,11 @@ class PracticeOwnerProfile extends AccountRecord {
     super.phone,
     this.role, {
     this.createdAt,
+    this.verificationStatus,
   });
   final String role;
   final DateTime? createdAt;
+  final Object? verificationStatus;
 
   factory PracticeOwnerProfile.fromMap(String id, Map<String, dynamic> data) {
     String field(String key) {
@@ -29,6 +31,7 @@ class PracticeOwnerProfile extends AccountRecord {
       field('email'),
       field('phoneNumber'),
       field('role'),
+      verificationStatus: data['verificationStatus'],
       createdAt: data['createdAt'] is Timestamp
           ? (data['createdAt'] as Timestamp).toDate()
           : null,

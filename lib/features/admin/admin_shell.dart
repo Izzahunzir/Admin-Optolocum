@@ -10,7 +10,6 @@ import 'locums/locum_accounts_page.dart';
 import 'locums/locum_service.dart';
 import 'job_postings/job_postings_page.dart';
 import 'job_postings/job_posting_service.dart';
-import 'reports/reports_page.dart';
 
 const _teal = Color(0xFF3D7789);
 const _background = Color(0xFFF5F7F9);
@@ -19,15 +18,8 @@ const _titles = [
   'Practice Owner Account',
   'Locum Account',
   'Job Posting',
-  'Reports',
 ];
-const _icons = [
-  Icons.dashboard,
-  Icons.person,
-  Icons.badge,
-  Icons.work,
-  Icons.assessment,
-];
+const _icons = [Icons.dashboard, Icons.person, Icons.badge, Icons.work];
 
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
@@ -268,7 +260,7 @@ class _AdminShellState extends State<AdminShell> {
                         const SizedBox(height: 14),
                         if (_selected == 2)
                           const Text(
-                            'Live locum profiles · Account actions are unavailable in this phase.',
+                            'Live locum profiles · Account actions require administrator confirmation.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.blueGrey,
@@ -276,13 +268,13 @@ class _AdminShellState extends State<AdminShell> {
                           )
                         else if (_selected == 1)
                           const Text(
-                            'Live practice owner profiles · Account actions are unavailable in this phase.',
+                            'Live practice owner profiles · Account actions require administrator confirmation.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.blueGrey,
                             ),
                           )
-                        else if (_selected != 4)
+                        else
                           Text(
                             _selected == 0
                                 ? 'Account profiles and job postings use Firestore · Profile trends use creation dates.'
@@ -302,8 +294,6 @@ class _AdminShellState extends State<AdminShell> {
                             query: _query,
                             onNavigate: _navigate,
                           )
-                        else if (_selected == 4)
-                          const ReportsPage()
                         else if (_selected == 1)
                           PracticeOwnerAccountsPage(
                             service: _owners,

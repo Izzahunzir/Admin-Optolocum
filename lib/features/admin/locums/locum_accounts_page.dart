@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../widgets/account_table.dart';
+import '../account_management/managed_account_table.dart';
 import '../widgets/paginated_records.dart';
 import 'locum_profile.dart';
 import 'locum_service.dart';
@@ -51,7 +51,7 @@ class LocumAccountsPage extends StatelessWidget {
               .toLowerCase()
               .contains(q),
           tableBuilder: (accounts) =>
-              AccountTable(accounts: accounts, readOnly: true),
+              ManagedAccountTable(accounts: accounts, kind: 'locum'),
         ),
       ],
     );
