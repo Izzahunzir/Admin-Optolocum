@@ -6,7 +6,9 @@
     "node": "22"
   },
   "scripts": {
-    "test": "node --test management.test.js local_app.test.js emulator/safety.test.js",
+    "test": "node --test management.test.js local_app.test.js emulator/safety.test.js migration.test.js inventory.test.js demo_config.test.js",
+    "inventory:production:read-only": "node inventory.js",
+    "migration:dry-run": "node migration.js",
     "start:local": "node local_server.js",
     "emulators:start": "node emulator/launch.js start",
     "test:emulator": "node emulator/launch.js test",

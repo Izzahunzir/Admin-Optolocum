@@ -1,4 +1,15 @@
-> Current Phase 1 local setup: see [LOCAL_BACKEND.md](LOCAL_BACKEND.md). All account-changing operations are disabled in the local server and Flutter UI. The Cloud Functions implementation below is preserved as an alternative, not deployed by Phase 1.
+> Current workflow: [FYP_DEMO.md](FYP_DEMO.md). Simplified local account actions are
+> prepared and tested with UID allowlisting and independent backend/Flutter gates
+> OFF by default. Live testing requires separate approval. Phase 4/5 rollout and
+> inventory are stopped; older notes below are historical.
+
+> Phase 5A preparation: see [PHASE_5A.md](PHASE_5A.md) for emulator-only trusted
+> provisioning, the offline migration report, and unresolved immediate-onboarding
+> constraints. Production gates remain closed; no deployment is authorized.
+
+> Phase 5C: [PHASE_5C.md](PHASE_5C.md) specifies the separate read-only production
+> inventory command and lifecycle protocol. Running production inventory requires
+> explicit user approval of the exact command, project, reads and output path.
 
 # Account management backend
 
