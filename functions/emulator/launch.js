@@ -13,7 +13,7 @@ assertEmulatorEnvironment(env);
 delete env.DEBUG; // Avoid CLI debug dumps of inherited environment variables.
 const args = [mode !== 'start' ? 'emulators:exec' : 'emulators:start', '--only', 'auth,firestore', '--project', PROJECT,
   '--config', path.join(__dirname, 'firebase.json')];
-if (mode === 'test') args.push('node --test emulator/integration.test.js');
+if (mode === 'test') args.push('node --test --test-concurrency=1 emulator/integration.test.js emulator/demo.integration.test.js');
 if (mode === 'rules') args.push('node --test emulator/access/rules.test.js');
 // Invoke the CLI JS directly: preserve the test command as one argument without a shell.
 const shim = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which',

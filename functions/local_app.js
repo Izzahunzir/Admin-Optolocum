@@ -19,7 +19,7 @@ function createSerialExecutor() {
   };
 }
 
-function createLocalApp({ auth, db, manager = manageAccount }) {
+function createLocalApp({ auth, db, manager = manageAccount, demoPolicy = null }) {
   const app = express();
   const serialized = createSerialExecutor();
   app.disable('x-powered-by');
@@ -47,7 +47,7 @@ function createLocalApp({ auth, db, manager = manageAccount }) {
     next();
   });
   // Liveness only: this exposes no Firebase credentials, identities or account data.
-  app.get('/health', (req, res) => res.json({ status: 'ok', mode: 'read-only', mutationsEnabled: false }));
+  app.get('/health', (req, res) => res.json({ status: 'ok', mode: demoPolicy?.enabled ? 'supervised-demo' : 'read-only', mutationsEnabled: demoPolicy?.enabled === true }));
   app.post(API_PATH, (req, res, next) => {
     if (Object.keys(req.query).length) return reject(res, 400, 'invalid-argument', 'Query parameters are not allowed.');
     if (!req.is('application/json')) return reject(res, 415, 'invalid-argument', 'Content-Type must be application/json.');
@@ -68,11 +68,13 @@ function createLocalApp({ auth, db, manager = manageAccount }) {
           ('disabled' in data && typeof data.disabled !== 'boolean') ||
           ('expectedDisabled' in data && typeof data.expectedDisabled !== 'boolean') ||
           ('confirmUid' in data && typeof data.confirmUid !== 'string')) return reject(res, 400, 'invalid-argument', 'Invalid account request.');
-      // Hard-coded Phase 1 gate: no environment flag can activate mutations.
-      if (data.action !== 'status') return reject(res, 403, 'failed-precondition', 'Account changes are disabled in Phase 1 pending security and Firestore session-access verification.');
-      if (Object.keys(data).some(key => !['uid', 'kind', 'action'].includes(key))) return reject(res, 400, 'invalid-argument', 'Unexpected status request fields.');
-      const result = await serialized(() => manager({ auth, db, actor, data }));
-      return res.json({ data: { disabled: result.disabled, mutationsEnabled: false } });
+      // Temporary first-live-test restriction. No config value can enable Delete.
+      if (data.action === 'delete') return reject(res, 403, 'permission-denied', 'Delete is blocked during the supervised Disable/Enable-only test.');
+      const approved = demoPolicy?.enabled === true && demoPolicy.allowsOperation?.(data.uid, data.kind, 'setDisabled') === true;
+      if (data.action !== 'status' && !approved) return reject(res, 403, 'failed-precondition', 'Account changes are off or this target is not approved for the supervised demo.');
+      if (data.action === 'status' && Object.keys(data).some(key => !['uid', 'kind', 'action'].includes(key))) return reject(res, 400, 'invalid-argument', 'Unexpected status request fields.');
+      const result = await serialized(() => manager({ auth, db, actor, data, demoPolicy }));
+      return res.json({ data: { ...result, mutationsEnabled: approved } });
     } catch (error) {
       if (error instanceof ManagementError) {
         const status = { 'permission-denied': 403, 'unauthenticated': 401, 'not-found': 404, 'invalid-argument': 400 }[error.code] || 409;
@@ -80,7 +82,7 @@ function createLocalApp({ auth, db, manager = manageAccount }) {
       }
       if (['auth/id-token-revoked', 'auth/id-token-expired', 'auth/invalid-id-token', 'auth/argument-error', 'auth/user-disabled'].includes(error.code)) return reject(res, 401, 'unauthenticated', 'Please sign in again.');
       if (error.code === 'auth/user-not-found') return reject(res, 404, 'not-found', 'Authentication account not found.');
-      if (['auth/insufficient-permission', 'permission-denied', 7].includes(error.code)) return reject(res, 403, 'permission-denied', 'The local server identity lacks required Firebase Authentication or Firestore read permissions.');
+      if (['auth/insufficient-permission', 'permission-denied', 7].includes(error.code)) return reject(res, 403, 'permission-denied', 'The local server identity lacks required Firebase Authentication or Firestore permissions.');
       if (error.code === 'resource-exhausted') return reject(res, 429, error.code, 'Server busy. Please retry.');
       return reject(res, 503, 'unavailable', 'Unable to verify Firebase account status. Check the local server credentials and connection.');
     }

@@ -1,5 +1,13 @@
 # Isolated account-management emulator tests
 
+Current launcher runs the original management suite and the FYP demo suite through
+local_app.js. See [../FYP_DEMO.md](../FYP_DEMO.md). Provisioning tests are retained
+as historical files but excluded from this runner. The Phase 5A notes below are historical.
+
+Phase 5A also tests `POST /api/accounts/provision` with emulator administrator
+tokens and verified profiles. See [../PHASE_5A.md](../PHASE_5A.md) for constraints.
+`test:emulator` runs both suites sequentially; the deny-all fixture is unchanged.
+
 This environment uses **demo-optolocum-account-management** only. It does not use
 the production project, service-account files, Application Default Credentials,
 production rules, or verification functionality. Production Flutter and Express

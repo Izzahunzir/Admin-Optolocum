@@ -107,7 +107,7 @@ test('all mutations are blocked after authentication and before business dispatc
   ]) {
     const r = await f.request({ body });
     assert.equal(r.status, 403);
-    assert.equal(r.json.error.code, 'failed-precondition');
+    assert.equal(r.json.error.code, body.action === 'delete' ? 'permission-denied' : 'failed-precondition');
   }
   assert.equal(f.checks.length, 3);
   assert.equal(f.dispatches(), 0);

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "projectId": "optolocum-f314e",
+  "capturedAt": "2026-11-03T00:00:00.000Z",
+  "users": [
+    { "uid": "synthetic-admin", "disabled": false, "customClaims": { "admin": true }, "tokensValidAfterTime": "2026-01-01T00:00:00.000Z" },
+    { "uid": "synthetic-locum", "disabled": false, "tokensValidAfterTime": "2026-01-01T00:00:00.000Z" },
+    { "uid": "synthetic-owner", "disabled": true, "tokensValidAfterTime": "2026-01-01T00:00:00.000Z" },
+    { "uid": "synthetic-missing", "disabled": false, "tokensValidAfterTime": "2026-01-01T00:00:00.000Z" }
+  ],
+  "locumProfiles": [ { "uid": "synthetic-locum", "verificationStatus": "verified" } ],
+  "ownerProfiles": [ { "uid": "synthetic-owner", "verificationStatus": "unverified" } ],
+  "accessRecords": []
+}
