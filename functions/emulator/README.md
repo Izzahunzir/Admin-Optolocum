@@ -1,12 +1,13 @@
 # Isolated account-management emulator tests
 
-Current launcher runs the original management suite and the FYP demo suite through
-local_app.js. See [../FYP_DEMO.md](../FYP_DEMO.md). Provisioning tests are retained
-as historical files but excluded from this runner. The Phase 5A notes below are historical.
+The current launcher runs the legacy management integration suite plus the restricted
+two-role FYP demo suite through local_app.js. See [../FYP_DEMO.md](../FYP_DEMO.md).
+The obsolete standalone provisioning test has been removed. Legacy management tests retain deletion coverage
+in synthetic emulators only; the supervised local backend still rejects Delete.
 
-Phase 5A also tests `POST /api/accounts/provision` with emulator administrator
-tokens and verified profiles. See [../PHASE_5A.md](../PHASE_5A.md) for constraints.
-`test:emulator` runs both suites sequentially; the deny-all fixture is unchanged.
+The manual emulator server retains historical provisioning support because the
+legacy integration test imports it. That route is not part of the local FYP backend.
+See [../FYP_CLEANUP_REVIEW.md](../FYP_CLEANUP_REVIEW.md) before removing files.
 
 This environment uses **demo-optolocum-account-management** only. It does not use
 the production project, service-account files, Application Default Credentials,

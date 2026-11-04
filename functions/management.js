@@ -14,7 +14,7 @@ async function manageAccount({ auth, db, actor, data, now = Date.now(), demoPoli
   const allowed = action === 'status' ? ['uid', 'kind', 'action'] : action === 'setDisabled' ? ['uid', 'kind', 'action', 'disabled', 'expectedDisabled'] : ['uid', 'kind', 'action', 'confirmUid'];
   if (Object.keys(data).some(key => !allowed.includes(key))) fail('invalid-argument', 'Unexpected account request fields.');
   if (demoPolicy && action === 'delete') fail('permission-denied', 'Delete is blocked during the supervised Disable/Enable-only test.');
-  if (demoPolicy && action !== 'status' && (!demoPolicy.enabled || demoPolicy.allowsOperation?.(uid, kind, action) !== true)) fail('permission-denied', 'Only Disable/Enable for the explicitly selected approved Locum is permitted.');
+  if (demoPolicy && action !== 'status' && (!demoPolicy.enabled || demoPolicy.allowsOperation?.(uid, kind, action) !== true)) fail('permission-denied', 'Only Disable/Enable for explicitly selected approved accounts with matching roles is permitted.');
   const caller = await auth.getUser(actor.uid);
   if (caller.disabled || caller.customClaims?.admin !== true) fail('permission-denied', 'Administrator access is no longer valid.');
   if (actor.uid === uid) fail('failed-precondition', 'You cannot manage your own account.');

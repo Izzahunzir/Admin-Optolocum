@@ -1,210 +1,22 @@
-﻿# Phase 1: local, read-only account-management API
+# Local account backend
 
-This is the current supported local workflow. No Blaze upgrade, Cloud Functions
-deployment, new credentials, account mutation, billing change, or rules deployment
-is performed by these instructions or by `/health`.
+The current local FYP workflow is documented in [FYP_DEMO.md](FYP_DEMO.md).
+It supports supervised Disable/Enable for selected Locum and Practice Owner
+accounts. The former Phase 1 status-only instructions are superseded.
 
-## Requirements
+The backend uses the existing approved server credential in the backend terminal;
+Flutter uses the signed-in administrator's Firebase token. Keep credentials outside
+Git and Flutter. Do not change credential files, IAM or project configuration as
+part of UI cleanup.
 
-- Node.js 22 is the existing backend's declared runtime; npm is required.
-- Flutter SDK and Chrome.
-- Internet access for actual Firebase status reads.
-- An existing approved server identity with Firebase Authentication user-read and
-  required Firestore read permissions for project `optolocum-f314e`.
-- A Firebase administrator signed into Flutter with a current `admin: true` claim.
+Run npm.cmd run start:local from functions. The server binds 127.0.0.1:8787;
+Flutter must use browser origin http://localhost:5173. GET /health reports local
+liveness without querying Firebase. It does not establish credential readiness.
+The ignored .demo-local.json and Flutter build flags independently control
+mutations. No gate or local selector is changed by this cleanup.
 
-The browser's admin login and the server's Firebase credentials are different.
-A Firebase CLI login alone does not necessarily provide Admin SDK credentials.
-Use Application Default Credentials supported by Firebase Authentication, preferably
-an approved service identity. If using an existing service-account JSON, store it
-outside this repository and restrict its Windows file permissions. Never put keys
-in Flutter assets, dart-define, browser storage, logs, or Git. This phase creates no
-credentials. Standard gcloud end-user ADC has additional Authentication constraints.
-
-## Terminal 1: backend
-
-```powershell
-Set-Location 'C:\Users\unzir\Desktop\MobileApp\Admin-Optolocum\functions'
-npm.cmd ci --ignore-scripts
-npm.cmd test
-# Only if your existing approved credential uses a JSON file:
-$env:GOOGLE_APPLICATION_CREDENTIALS = 'C:\secure\optolocum-admin.json'
-npm.cmd run start:local
-```
-
-Replace the credential path with the location of your existing approved file.
-If suitable ADC is already configured, omit the environment assignment. Do not
-copy credentials into the project. `GOOGLE_APPLICATION_CREDENTIALS` is set only in
-this backend terminal; do not set it in the Flutter terminal.
-
-The server binds **only** to `127.0.0.1:8787`. Port conflicts fail startup. Stop it
-with Ctrl+C. Emulator environment variables are rejected by the live-project entry
-point so unsigned emulator tokens cannot bypass real Firebase verification.
-
-## Terminal 2: check health, then Flutter
-
-```powershell
-Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8787/health'
-Set-Location 'C:\Users\unzir\Desktop\MobileApp\Admin-Optolocum'
-flutter pub get
-flutter run -d chrome --web-hostname localhost --web-port 5173 --dart-define=ACCOUNT_API_BASE_URL=http://127.0.0.1:8787
-```
-
-Health returns `status: ok`, `mode: read-only`, `mutationsEnabled: false`. It is a
-liveness check, not confirmation that Firebase credentials or admin permissions work.
-It never queries Firebase. Sign into the dashboard to test authorized status reads.
-If Flutter reports missing Windows symlink support, enable Windows Developer Mode.
-
-Use exactly `http://localhost:5173` for Flutter. `127.0.0.1:5173`, other ports,
-external origins, and `Origin: null` are not on the allowlist. Chrome supplies Origin
-automatically. Test browser permissions on the actual exhibition laptop; do not turn
-off browser security. Flutter without the dart-define retains its existing callable
-status transport, but **all mutations are still blocked** in Phase 1.
-
-## HTTP contract and security
-
-`POST http://127.0.0.1:8787/api/accounts/manage` accepts JSON:
-
-```json
-{"uid":"TARGET_UID","kind":"locum","action":"status"}
-```
-
-`kind` may also be `practice_owner`. A Firebase ID token is required in the Bearer
-Authorization header. Never put tokens in URLs. Each request uses `verifyIdToken`
-with revocation checking and checks the caller's current Authentication record:
-`admin: true` in both the token and current claims, and the caller must be enabled.
-The reused status logic also protects self/admin targets and verifies the profile.
-
-- Exact Host: `127.0.0.1:8787`; exact browser Origin: `http://localhost:5173`.
-- PowerShell GET /health may omit Origin; privileged requests may not.
-- Origin is checked before dispatch. CORS is not a substitute for authentication.
-- Approved OPTIONS preflight is unauthenticated and cannot reach Firebase.
-- JSON limit: 4 KiB. Unknown fields, invalid IDs, queries, and wrong types fail.
-- Safe JSON errors contain no tokens, credential contents, or internal stacks.
-- No cookies, wildcard origins, credentialed CORS, LAN binding or tunnels.
-- Flutter validates the loopback base URL and disables HTTP redirects.
-- A bounded promise queue serializes status dispatch and is ready for future
-  mutation serialization. Single-process only; multiple processes need a shared lock.
-- `setDisabled` and `delete` are rejected by a hard-coded server gate **before**
-  dispatching the business logic. There is no environment switch to enable them.
-- Flutter has a separate hard-coded mutation gate and disables all account controls
-  even if a response claims mutations are enabled. Existing dialogs remain in code.
-
-## Remaining blockers before Phase 2
-
-1. Verify credentials, real admin claims, live permissions, and deployed rules.
-2. Design protected backend-controlled disabled/deleting and revocation metadata.
-3. Review/test/deploy Firestore checks for existing sessions across all protected
-   collections. Disabling Auth and revoking refresh tokens alone do not immediately
-   deny requests carrying unexpired ID tokens; the custom claim alone is insufficient.
-4. Plan safe metadata initialization and recovery for partial Auth/Firestore failures.
-5. Verify request authentication and guards on the actual demonstration laptop.
-6. Explicitly review and authorize a future phase before changing either mutation gate.
-
-Keep the existing 61-minute deletion guard, recent admin login, exact typed UID,
-self/admin protections, and related-record checks in any future phase. Rules changes
-can be deployed separately on Spark, but this phase changes/deploys no rules.
-Existing offline data cannot be remotely erased. The local process requires internet
-for Firebase and serves only this laptop, not visitors' devices. Spark quotas still
-apply. Cloud Functions code (`index.js`) and business logic (`management.js`) are
-preserved; do not deploy them as part of this phase.
-
-## Phase 2A: verify authenticated status reads (still no account changes)
-
-The Dashboard now shows a small read-only diagnostic on each account page:
-
-1. Restart the local backend in its existing credential-configured terminal to load
-   the current code (`npm.cmd run start:local`). No credential contents need to be
-   displayed or copied. A working /health checks liveness only.
-2. Restart Flutter using the fixed origin and ACCOUNT_API_BASE_URL command above.
-3. Sign in as an administrator, then open Locum Account or Practice Owner Account.
-4. Confirm the label reads `Status source: localhost (read-only)`. A Cloud Functions
-   label means Flutter was launched without the local API dart-define.
-5. Click `Refresh account status`. This makes only `action: status` requests for
-   the currently displayed rows. It never calls Disable, Enable or Delete.
-6. A successful result shows `Status read succeeded for N of N displayed accounts.`
-   Each row shows Enabled or Disabled from Firebase Authentication. This is separate
-   from the profile's verification status. All action buttons remain unavailable.
-
-Use existing non-admin target profiles that match actual Authentication UIDs. Self
-and admin targets remain protected, and orphaned/missing profiles or Authentication
-users produce errors. An empty account table gives no account to test. A partial
-success count means only those successful rows were verified, not all accounts.
-
-- `unauthenticated`: sign out and sign in again; expired, revoked, disabled or missing
-  sessions cannot pass the status endpoint.
-- `permission-denied`: either admin authorization is absent/removed, or the server
-  identity lacks required Auth/Firestore read permissions. The displayed message
-  distinguishes these cases without exposing credentials.
-- `origin-not-allowed`: open exactly http://localhost:5173.
-- `unavailable`: check the local server, credential availability, network and browser
-  permissions. Browsers mask many CORS failures as network failures; the Flutter UI
-  cannot definitively distinguish all of them. The server still rejects bad origins.
-- `not-found`: the Authentication identity or selected profile could not be found.
-
-The client retrieves the signed-in Firebase user's ID token and sends it in the
-Authorization header only. Redirects are disabled. The server verifies it using
-`verifyIdToken(token, true)` and rechecks current admin claims and enabled state.
-It then reads the target Authentication user and matching Firestore profile.
-Neither side logs token values or credential contents. Never copy request headers,
-ID tokens or service account keys into chat or screenshots.
-
-Automated tests use synthetic tokens and injected fake Firebase services. They do
-not establish live credentials, production IAM permissions or success of the admin's
-actual browser session. A live authenticated read is confirmed only after the actual
-signed-in Chrome request returns successfully. No Auth changes, Firestore writes,
-rules deployments or billing changes are part of this check.
-
-
-## Mock account-action development
-
-Production mutations remain blocked in Flutter, Express and the retained callable.
-Verification functionality is unchanged. No environment flag enables mutations.
-AccountManagementApi.mock uses an injected in-memory transport and synthetic token
-provider only; it never dispatches to HTTP or Cloud Functions. Never use this
-constructor in an application startup path.
-
-From the repository root run:
-
-    flutter analyze --no-pub
-    flutter test --no-pub test/account_management_test.dart test/account_management_workflow_test.dart
-
-From functions run npm.cmd test. Tests cover both profile kinds, confirmations,
-cancellation, typed UID, invalid requests, authorization, state conflicts and partial
-failures. Mutations are never automatically retried. An uncertain result clears the
-row status and requires refresh; a successful status read does not prove session
-revocation completed. Partial changes still require administrator recovery.
-
-### Next emulator integration phase
-
-1. Use Auth and Firestore emulators with demo-optolocum-account-management, synthetic
-   identities and no production credentials.
-2. Implement a separate emulator-only runner requiring both loopback emulator hosts
-   and a demo- project ID. Keep local_server.js unchanged: it rejects emulator hosts.
-3. Seed synthetic administrators, both non-admin profile kinds and dependency data.
-4. Add an emulator-only transport, keeping production mutation gates closed. Test
-   stale tokens, self/admin targets, recent login, expected state, typed UID,
-   dependency checks, the 61-minute waiting period and failure/retry recovery.
-5. Test Firestore lockout against the exact deployed-rules baseline plus reviewed
-   access protection; older sibling fixtures are not the production baseline.
-
-No mutation-capable HTTP emulator runner is provided yet. Mock tests do not prove
-Firestore lockout. Production activation still requires account access metadata,
-authentication-time rules, migration, trusted provisioning, durable coordination
-and recovery, and signup/query/listener regression tests. Do not deploy or migrate
-as part of this development workflow.
-
-
-## Phase 3: isolated emulator integration
-
-See [emulator/README.md](emulator/README.md) for the implemented demo-only runner,
-startup checks and integration tests. Production mutation gates remain closed.
-The earlier note that no emulator HTTP runner exists is superseded by Phase 3.
-
-
-## Phase 4: candidate access rules (blocked design stage)
-
-See [emulator/access/README.md](emulator/access/README.md) for the user-supplied
-production baseline, separate strict candidate, registration blocker and emulator
-rules tests. Run npm.cmd run test:rules from functions. No production deployment
-or mutation activation is authorized; immediate new-user provisioning is unresolved.
+Recent admin authentication, current authorization, self/admin protections,
+role-profile checks, expected state, strict Host/Origin and payload checks remain
+required. Account Delete has no UI and stays blocked in the supervised backend.
+Existing ID tokens may last until expiry; immediate Firestore lockout is not promised.
+No deployment or production rule changes are needed for the local demonstration.
