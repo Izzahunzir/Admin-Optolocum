@@ -1,5 +1,6 @@
 ﻿"use strict";
 const express = require('express');
+const { manageJob } = require('./job_management');
 const { manageAccount, ManagementError } = require('./management');
 
 const HOST = '127.0.0.1';
@@ -39,7 +40,7 @@ function createLocalApp({ auth, db, manager = manageAccount, demoPolicy = null }
     if (origin !== ORIGIN) return reject(res, 403, 'permission-denied', 'An approved browser origin is required.');
     if (req.method === 'OPTIONS') {
       const headers = String(req.headers['access-control-request-headers'] || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
-      if (req.path !== API_PATH || req.headers['access-control-request-method'] !== 'POST' || headers.some(x => !['authorization', 'content-type'].includes(x))) return reject(res, 403, 'permission-denied', 'Preflight not allowed.');
+      if (![API_PATH, '/api/jobs/soft-delete'].includes(req.path) || req.headers['access-control-request-method'] !== 'POST' || headers.some(x => !['authorization', 'content-type'].includes(x))) return reject(res, 403, 'permission-denied', 'Preflight not allowed.');
       res.set('Access-Control-Allow-Methods', 'POST');
       res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
       return res.sendStatus(204);
@@ -48,7 +49,7 @@ function createLocalApp({ auth, db, manager = manageAccount, demoPolicy = null }
   });
   // Liveness only: this exposes no Firebase credentials, identities or account data.
   app.get('/health', (req, res) => res.json({ status: 'ok', mode: demoPolicy?.enabled ? 'supervised-demo' : 'read-only', mutationsEnabled: demoPolicy?.enabled === true }));
-  app.post(API_PATH, (req, res, next) => {
+  app.post([API_PATH, '/api/jobs/soft-delete'], (req, res, next) => {
     if (Object.keys(req.query).length) return reject(res, 400, 'invalid-argument', 'Query parameters are not allowed.');
     if (!req.is('application/json')) return reject(res, 415, 'invalid-argument', 'Content-Type must be application/json.');
     next();
@@ -61,6 +62,10 @@ function createLocalApp({ auth, db, manager = manageAccount, demoPolicy = null }
       const current = await auth.getUser(actor.uid);
       if (current.disabled || current.customClaims?.admin !== true) return reject(res, 403, 'permission-denied', 'Administrator authorization is no longer valid.');
       const data = req.body;
+      if (req.path === '/api/jobs/soft-delete') {
+        const result = await serialized(() => manageJob({ auth, db, actor, data, demoPolicy }));
+        return res.json({ data: result });
+      }
       const fields = new Set(['uid', 'kind', 'action', 'disabled', 'expectedDisabled', 'confirmUid']);
       if (!data || Array.isArray(data) || Object.keys(data).some(key => !fields.has(key)) ||
           typeof data.uid !== 'string' || !data.uid || data.uid.length > 128 || data.uid.includes('/') ||

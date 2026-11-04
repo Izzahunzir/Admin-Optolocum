@@ -32,3 +32,19 @@ test('local credential preflight is offline, sanitized and rejects unsafe config
   for (const patch of [{ DEBUG: 'synthetic' }, { FIRESTORE_EMULATOR_HOST: '127.0.0.1' }, { GCLOUD_PROJECT: 'wrong' }])
     assert.throws(() => assertLocalServerEnvironment({ ...env, ...patch }, () => true));
 });
+
+test('optional owner selector permits exactly one owner without changing Locum scope', () => {
+  const base = { projectId: PROJECT, enableMutations: true, approvedTestUids: ['synthetic-locum', 'synthetic-owner', 'synthetic-other'], locumTestUid: 'synthetic-locum', practiceOwnerTestUid: 'synthetic-owner' };
+  const policy = parseDemoConfig(base);
+  for (const [uid, kind] of [['synthetic-locum', 'locum'], ['synthetic-owner', 'practice_owner']]) {
+    assert.equal(policy.allowsOperation(uid, kind, 'setDisabled'), true);
+    assert.equal(policy.allowsOperation(uid, kind, 'delete'), false);
+    assert.equal(parseDemoConfig({ ...base, enableMutations: false }).allowsOperation(uid, kind, 'setDisabled'), false);
+  }
+  for (const [uid, kind] of [['synthetic-owner', 'locum'], ['synthetic-locum', 'practice_owner'], ['synthetic-other', 'practice_owner']])
+    assert.equal(policy.allowsOperation(uid, kind, 'setDisabled'), false);
+  for (const practiceOwnerTestUid of ['synthetic-locum', 'unapproved', '', '*', '../bad', null, 123, undefined])
+    assert.throws(() => parseDemoConfig({ ...base, practiceOwnerTestUid }));
+  assert.throws(() => parseDemoConfig({ ...base, extra: true }));
+  assert.throws(() => parseDemoConfig({ ...base, locumTestUid: undefined }));
+});

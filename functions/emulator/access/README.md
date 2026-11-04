@@ -1,9 +1,11 @@
 # Phase 4: tested security design, NOT ready for deployment
 
-Phase 5A adds emulator-only approval-stage provisioning and an offline migration
-planner; see [../../PHASE_5A.md](../../PHASE_5A.md). It supersedes the historical
-"not implemented" migration note below. Candidate rules are unchanged and the
-immediate-onboarding blocker remains unresolved.
+This directory retains historical emulator-only access-rule research. It is not
+part of the local FYP demonstration and is not ready for deployment. Provisioning
+and migration implementations remain for their active dependencies; obsolete
+Phase 5 design documents and examples were removed after review. See
+[../../FYP_DEMO.md](../../FYP_DEMO.md) for the current workflow. Candidate rules
+are unchanged and the immediate-onboarding blocker remains unresolved.
 
 ## Source and scope
 
