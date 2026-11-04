@@ -6,7 +6,7 @@ const path = require('node:path');
 const { assertEmulatorEnvironment, PROJECT } = require('../safety');
 assertEmulatorEnvironment();
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
-const { doc, collection, query, where, getDoc, getDocs, setDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, runTransaction, onSnapshot, setLogLevel } = require('firebase/firestore');
+const { doc, collection, query, where, getDoc, getDocs, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, serverTimestamp, Timestamp, runTransaction, onSnapshot, setLogLevel } = require('firebase/firestore');
 setLogLevel('silent'); // Negative assertions intentionally produce permission denials.
 const text = { fullName: 'Synthetic Locum', highestEducation: 'Degree', course: 'Optometry' };
 const ownerProfile = () => ({ fullName: 'Synthetic Owner', email: 'owner@example.invalid', phoneNumber: '012', role: 'HR', verificationStatus: 'unverified', createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
@@ -20,9 +20,25 @@ test('candidate preserves the supplied baseline except for the explicit access g
   assert.equal(candidate, baseline.replaceAll('request.auth != null', 'hasActiveSession()'));
 });
 
-for (const file of ['production-supplied.rules', 'candidate.rules']) {
+test('soft-delete proposal changes only the job match in the complete supplied baseline', () => {
+  const baseline = readFileSync(path.join(__dirname, 'published-current.rules'), 'utf8');
+  const proposal = readFileSync(path.join(__dirname, 'job-soft-delete.rules'), 'utf8');
+  const outsideJobs = source => source
+    .replace(/^    match \/job_postings\/\{jobId\} \{[\s\S]*?^    \}/m, '');
+  assert.equal(outsideJobs(proposal), outsideJobs(baseline));
+  // The entire baseline has only disjoint, direct collection matches: no wildcard bypass.
+  assert.deepEqual([...proposal.matchAll(/match\s+([^\s]+)\s*\{/g)].map(match => match[1]), [
+    '/databases/{database}/documents', '/job_postings/{jobId}', '/applications/{applicationId}',
+    '/locum_profiles/{locumId}', '/application_applicant_summaries/{applicationId}',
+    '/practice_owner_profiles/{ownerId}',
+  ]);
+});
+
+for (const file of ['production-supplied.rules', 'candidate.rules', 'published-current.rules', 'job-soft-delete.rules']) {
   test(file, { timeout: 120000 }, async t => {
     const candidate = file === 'candidate.rules';
+    const softDelete = file === 'job-soft-delete.rules';
+    const currentPublished = softDelete || file === 'published-current.rules';
     const env = await initializeTestEnvironment({ projectId: PROJECT, firestore: {
       host: '127.0.0.1', port: 18080, rules: readFileSync(path.join(__dirname, file), 'utf8'),
     } });
@@ -79,7 +95,7 @@ for (const file of ['production-supplied.rules', 'candidate.rules']) {
       await assertSucceeds(updateDoc(doc(db('admin'), 'job_postings/job'), { status: 'available' }));
       // Preserve this baseline quirk: owner delete reads request.resource (absent on delete).
       await assertFails(deleteDoc(doc(db('owner'), 'job_postings/job')));
-      await assertSucceeds(deleteDoc(doc(db('admin'), 'job_postings/new')));
+      await (softDelete ? assertFails : assertSucceeds)(deleteDoc(doc(db('admin'), 'job_postings/new')));
     });
     await scenario('application creation validates identity, relationship, fields and timestamp', async () => {
       await seed(database => deleteDoc(doc(database, 'applications/job_locum')));
@@ -137,6 +153,90 @@ for (const file of ['production-supplied.rules', 'candidate.rules']) {
       await expected(setDoc(doc(db('new-locum'), 'locum_profiles/new-locum'), { ...text, verificationStatus: 'pending' }));
       await expected(setDoc(doc(db('owner'), 'practice_owner_profiles/owner'), ownerProfile()));
     });
+    if (currentPublished) {
+      await scenario('published application transitions remain allowed, including after job deletion', async () => {
+        for (const status of ['available', 'deleted']) {
+          await seed(async database => {
+            await updateDoc(doc(database, 'job_postings/job'), { status });
+            await updateDoc(doc(database, 'applications/job_locum'), { status: 'pending' });
+          });
+          const ownerRef = doc(db('owner'), 'applications/job_locum');
+          await assertFails(updateDoc(doc(db('other'), 'applications/job_locum'), { status: 'hired' }));
+          await assertFails(updateDoc(ownerRef, { status: 'completed' }));
+          await assertFails(updateDoc(ownerRef, { status: 'hired', jobId: 'other' }));
+          await assertSucceeds(updateDoc(ownerRef, { status: 'hired' }));
+          await assertFails(updateDoc(ownerRef, { status: 'rejected' }));
+          await assertSucceeds(updateDoc(ownerRef, { status: 'completed' }));
+          await assertFails(updateDoc(ownerRef, { status: 'pending' }));
+          await seed(database => updateDoc(doc(database, 'applications/job_locum'), { status: 'pending' }));
+          await assertSucceeds(updateDoc(ownerRef, { status: 'rejected' }));
+        }
+      });
+    }
+    if (softDelete) {
+      await scenario('owners and admin clients cannot alter deletion state or metadata', async () => {
+        for (const uid of ['owner', 'admin', 'other']) {
+          const ref = doc(db(uid), 'job_postings/job');
+          await assertFails(updateDoc(ref, { status: 'deleted' }));
+          await assertFails(updateDoc(ref, { deletedAt: serverTimestamp() }));
+          await assertFails(setDoc(ref, { clinicOwnerId: 'owner', status: 'deleted', deletedAt: serverTimestamp() }));
+          await assertFails(deleteDoc(ref));
+          await assertFails(setDoc(doc(db(uid), `job_postings/forged-${uid}`), {
+            clinicOwnerId: uid, status: 'available', deletedAt: null,
+          }));
+        }
+        await assertSucceeds(updateDoc(doc(db('owner'), 'job_postings/job'), { title: 'Edited', status: 'closed' }));
+        await assertSucceeds(updateDoc(doc(db('owner'), 'job_postings/job'), { status: 'available' }));
+        await assertFails(updateDoc(doc(db('owner'), 'job_postings/job'), { clinicOwnerId: 'other' }));
+        await seed(database => updateDoc(doc(database, 'job_postings/job'), { deletedAt: Timestamp.fromMillis(1) }));
+        for (const uid of ['owner', 'admin']) {
+          const ref = doc(db(uid), 'job_postings/job');
+          await assertFails(updateDoc(ref, { deletedAt: Timestamp.fromMillis(2) }));
+          await assertFails(updateDoc(ref, { deletedAt: deleteField() }));
+          await assertFails(setDoc(ref, { deletedAt: null }, { merge: true }));
+          await assertFails(setDoc(ref, { clinicOwnerId: 'owner', status: 'available' }));
+          await assertSucceeds(updateDoc(ref, { title: 'Metadata preserved' }));
+        }
+      });
+      await scenario('atomic client writes cannot bypass deleted-job protection', async () => {
+        await seed(database => updateDoc(doc(database, 'job_postings/job'), { status: 'deleted', deletedAt: Timestamp.fromMillis(1) }));
+        for (const uid of ['owner', 'admin']) {
+          const database = db(uid);
+          const ref = doc(database, 'job_postings/job');
+          await assertFails(runTransaction(database, async tx => {
+            await tx.get(ref);
+            tx.update(ref, { status: 'available', deletedAt: deleteField() });
+          }));
+          const batch = writeBatch(database);
+          batch.delete(ref);
+          batch.set(doc(database, `job_postings/batch-${uid}`), { clinicOwnerId: uid, status: 'available' });
+          await assertFails(batch.commit());
+          await seed(async privileged => {
+            assert.equal((await getDoc(doc(privileged, 'job_postings/job'))).data().status, 'deleted');
+            assert.equal((await getDoc(doc(privileged, `job_postings/batch-${uid}`))).exists(), false);
+          });
+        }
+      });
+      await scenario('deleted jobs remain readable but immutable, with history preserved and new applications denied', async () => {
+        await seed(database => updateDoc(doc(database, 'job_postings/job'), { status: 'deleted', deletedAt: Timestamp.fromMillis(1) }));
+        for (const uid of ['owner', 'admin', 'locum', 'other']) {
+          const ref = doc(db(uid), 'job_postings/job');
+          await assertSucceeds(getDoc(ref));
+          await assertSucceeds(getDocs(collection(db(uid), 'job_postings')));
+          for (const patch of [{ status: 'available' }, { title: 'Changed' }, { status: 'deleted' }]) {
+            await assertFails(updateDoc(ref, patch));
+          }
+          await assertFails(setDoc(ref, { clinicOwnerId: uid, status: 'available' }));
+          await assertFails(deleteDoc(ref));
+        }
+        await assertSucceeds(getDoc(doc(db('locum'), 'applications/job_locum')));
+        await assertSucceeds(getDoc(doc(db('owner'), 'application_applicant_summaries/job_locum')));
+        await assertFails(setDoc(doc(db('new-locum'), 'applications/job_new-locum'), {
+          jobId: 'job', locumId: 'new-locum', clinicOwnerId: 'owner', status: 'pending', appliedAt: serverTimestamp(),
+        }));
+        await assertFails(getDoc(doc(db(null), 'job_postings/job')));
+      });
+    }
     if (candidate) {
       for (const state of ['disabled', 'deleting', 'deleted', 'missing', 'malformed', 'stale', 'equal-cutoff']) {
         await scenario(`${state} denies protected reads, queries and writes including admins`, async () => {

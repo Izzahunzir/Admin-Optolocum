@@ -1,5 +1,24 @@
 # Local FYP job soft delete (live permission OFF by default)
 
+## Rules release — 2026-11-04
+
+Following approval to proceed, the reviewed Firestore rules were deployed to
+`optolocum-f314e` using `--only firestore:rules` and
+`emulator/access/firebase.rules-deploy.json`. Firebase confirmed successful
+compilation and release. The exact source is
+`emulator/access/job-soft-delete.rules` (SHA-256
+`58e0fdf707c307edf53924393713770c38dc34f5af301c9ec6d9af156f9fc00b`).
+
+The user-supplied current Console export is retained in
+`emulator/access/published-current.rules`. The replacement changes only the
+job_postings match; all text outside it is preserved exactly, including published
+application status transitions. The exact merged rules passed 57 emulator tests.
+
+No live documents, account management, functions, or mutation gates were changed.
+Job Posting Delete activation still requires separate approval. The historical
+proposal-only discussion below describes the earlier implementation stage and is
+superseded by this release record for the admin rules source only.
+
 POST /api/jobs/soft-delete is separate from account management. It accepts jobId
 and action=status, or action=softDelete with expectedStatus. It verifies a
 revocation-checked Firebase administrator token, current admin claim/enabled
