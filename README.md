@@ -1,17 +1,25 @@
-# admin_optolocum
+# Admin-Optolocum
 
-A new Flutter project.
+Flutter admin dashboard for the Optolocum FYP, with Dashboard, Locum Accounts,
+Practice Owner Accounts, Job Postings and Reports pages.
 
-## Getting Started
+Locum and Practice Owner accounts support supervised Disable/Enable through a
+local Node.js backend and Firebase Authentication. Account tables show status and
+have no Delete button. Search, pagination and verification workflows are retained.
 
-This project is a starting point for a Flutter application.
+See [functions/FYP_DEMO.md](functions/FYP_DEMO.md) for the local demo workflow and
+[functions/README.md](functions/README.md) for backend entry points and tests.
+Credentials and actual account selectors belong outside source control.
 
-A few resources to get you started if this is your first Flutter project:
+Run flutter test and flutter analyze for Flutter validation. Run npm.cmd test in
+functions for offline backend tests. The isolated emulator suite is documented in
+[functions/emulator/README.md](functions/emulator/README.md).
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Job Posting soft deletion is implemented behind separate default-OFF gates.
+It retains the job and application history. See
+[functions/JOB_SOFT_DELETE.md](functions/JOB_SOFT_DELETE.md) for validation and
+undeployed rules proposals.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The seven approved obsolete files were removed after dependency review.
+See [functions/FYP_CLEANUP_REVIEW.md](functions/FYP_CLEANUP_REVIEW.md) for the
+cleanup record and retained dependencies.

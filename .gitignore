@@ -64,3 +64,7 @@ functions/emulator/.runtime/
 **/*service-account*.json
 **/*private-key*.json
 **/application_default_credentials.json
+
+# Phase 5C private account inventory (UID-level reports; never commit)
+functions/.private-inventory/
+functions/.demo-local.json

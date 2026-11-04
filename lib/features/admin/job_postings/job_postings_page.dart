@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'job_posting_table.dart';
+import 'managed_job_table.dart';
 import '../widgets/paginated_records.dart';
 import 'job_posting.dart';
 import 'job_posting_service.dart';
@@ -48,7 +48,7 @@ class JobPostingsPage extends StatelessWidget {
               ? 'No job postings available.'
               : 'No matching records.',
           matches: (job, query) => job.search.contains(query.toLowerCase()),
-          tableBuilder: (accounts) => JobPostingTable(jobs: accounts),
+          tableBuilder: (accounts) => ManagedJobTable(jobs: accounts),
         ),
       ],
     );

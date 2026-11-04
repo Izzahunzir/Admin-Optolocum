@@ -83,98 +83,71 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
     }
   }
 
-  Future<bool> _confirm(AccountRecord account, String action) async {
-    String typedUid = '';
-    return await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => StatefulBuilder(
-            builder: (context, updateDialog) => AlertDialog(
-              title: Text('$action account?'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${account.name}\n${account.email}\nUID: ${account.id}',
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      action == 'Delete'
-                          ? 'Permanently delete the Authentication account and both profile types for this UID. This cannot be undone. Related jobs or applications block deletion. Disable the account and wait at least 61 minutes first.'
-                          : action == 'Disable'
-                          ? 'Block new sign-ins and revoke refresh tokens? Existing access may continue until its current ID token expires (up to about one hour).'
-                          : 'Allow this account to sign in again? The user must log in again.',
-                    ),
-                    if (action == 'Delete') ...[
-                      const SizedBox(height: 16),
-                      TextField(
-                        decoration: const InputDecoration(
-                          labelText: 'Type the UID to confirm',
-                        ),
-                        onChanged: (value) =>
-                            updateDialog(() => typedUid = value),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: action == 'Delete' && typedUid != account.id
-                      ? null
-                      : () => Navigator.pop(dialogContext, true),
-                  child: Text(
-                    action,
-                    style: TextStyle(
-                      color: action == 'Delete'
-                          ? Colors.red
-                          : const Color(0xFF3D7789),
-                    ),
-                  ),
+  Future<bool> _confirm(AccountRecord account, String action) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('$action account?'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${account.name}\n${account.email}\nUID: ${account.id}'),
+                const SizedBox(height: 16),
+                Text(
+                  action == 'Disable'
+                      ? 'Block new sign-ins and revoke refresh tokens? Existing access may continue until its current ID token expires (up to about one hour).'
+                      : 'Allow this account to sign in again? Previously revoked sessions remain revoked. Existing ID tokens may remain valid until expiry.',
                 ),
               ],
             ),
           ),
-        ) ??
-        false;
-  }
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(
+                action,
+                style: const TextStyle(color: Color(0xFF3D7789)),
+              ),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 
-  Future<void> _act(AccountRecord account, {bool delete = false}) async {
-    if (!_api.accountChangesEnabled) return;
+  Future<void> _act(AccountRecord account) async {
+    if (!_api.canManage(account.id, widget.kind)) return;
     if (_busy.contains(account.id)) return;
     setState(() => _busy.add(account.id));
     try {
       // Re-read authoritative Authentication state before asking for confirmation.
       final state = await _api.call(account.id, widget.kind, 'status');
       if (!mounted) return;
+      if (!_api.canManage(account.id, widget.kind)) {
+        throw const AccountManagementException(
+          'failed-precondition',
+          'This account is not currently approved for the supervised demo.',
+        );
+      }
       final disabled = state['disabled'];
       if (disabled is! bool) throw StateError('Invalid account status');
       setState(() => _disabled[account.id] = disabled);
-      final action = delete
-          ? 'Delete'
-          : disabled
-          ? 'Enable'
-          : 'Disable';
+      final action = disabled ? 'Enable' : 'Disable';
       if (!await _confirm(account, action) || !mounted) return;
       final result = await _api.call(
         account.id,
         widget.kind,
-        delete ? 'delete' : 'setDisabled',
-        disabled: delete ? null : !disabled,
-        expectedDisabled: delete ? null : disabled,
-        confirmUid: delete ? account.id : null,
+        'setDisabled',
+        disabled: !disabled,
+        expectedDisabled: disabled,
       );
       if (!mounted) return;
-      if (delete) {
-        _disabled.remove(account.id);
-      } else {
-        _disabled[account.id] = result['disabled'] as bool;
-      }
+      _disabled[account.id] = result['disabled'] as bool;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$action completed.')));
     } catch (error) {
@@ -197,7 +170,7 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
         const Padding(
           padding: EdgeInsets.only(bottom: 8),
           child: Text(
-            'Account changes are disabled in Phase 1 pending security verification.',
+            'Account changes are off. A supervised demo requires local configuration and approved test accounts.',
             style: TextStyle(fontSize: 12, color: Colors.blueGrey),
           ),
         ),
@@ -210,6 +183,8 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
                 ? 'Status source: Cloud Functions (local URL not configured)'
                 : _api.baseUrl == 'mock'
                 ? 'Status source: in-memory test backend'
+                : _api.accountChangesEnabled
+                ? 'Status source: localhost (supervised demo)'
                 : 'Status source: localhost (read-only)',
             style: const TextStyle(fontSize: 12, color: Colors.blueGrey),
           ),
@@ -252,11 +227,10 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
             ? (_disabled[a.id]! ? 'Disabled' : 'Enabled')
             : (_reading ? 'Checking…' : 'Unavailable'),
         canManage: (a) =>
-            _api.accountChangesEnabled &&
+            _api.canManage(a.id, widget.kind) &&
             _disabled.containsKey(a.id) &&
             !_busy.contains(a.id),
         onToggle: (a) => _act(a),
-        onDelete: (a) => _act(a, delete: true),
       ),
     ],
   );

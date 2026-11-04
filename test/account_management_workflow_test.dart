@@ -82,7 +82,7 @@ void main() {
 
   for (final kind in ['locum', 'practice_owner']) {
     testWidgets(
-      '$kind dialogs cancel, disable, enable and require typed UID for delete',
+      '$kind dialogs cancel, disable and enable with no Delete control',
       (tester) async {
         tester.view.physicalSize = const Size(1600, 1000);
         tester.view.devicePixelRatio = 1;
@@ -135,23 +135,11 @@ void main() {
           await tester.pumpAndSettle();
         }
         expect(mutations.length, 3);
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Delete'));
-        await tester.pumpAndSettle();
-        final confirm = find.widgetWithText(TextButton, 'Delete');
-        expect(tester.widget<TextButton>(confirm).onPressed, isNull);
-        await tester.enterText(find.byType(TextField), 'wrong');
-        await tester.pump();
-        expect(tester.widget<TextButton>(confirm).onPressed, isNull);
-        await tester.enterText(find.byType(TextField), 'target');
-        await tester.pump();
-        await tester.tap(confirm);
-        await tester.pumpAndSettle();
-        expect(mutations.last, {
-          'uid': 'target',
-          'kind': kind,
-          'action': 'delete',
-          'confirmUid': 'target',
-        });
+        expect(find.text('Delete'), findsNothing);
+        expect(
+          mutations.every((data) => data['action'] == 'setDisabled'),
+          true,
+        );
         expect(tester.takeException(), isNull);
       },
     );
