@@ -147,7 +147,27 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
         expectedDisabled: disabled,
       );
       if (!mounted) return;
-      _disabled[account.id] = result['disabled'] as bool;
+      if (result['disabled'] != !disabled) {
+        throw const AccountManagementException(
+          'internal',
+          'The account change could not be confirmed. Refresh status before retrying.',
+        );
+      }
+      // Treat the mutation response as an acknowledgement, then display a
+      // fresh authoritative status read from the same protected API.
+      final refreshed = await _api.call(account.id, widget.kind, 'status');
+      if (!mounted) return;
+      if (refreshed['disabled'] is! bool ||
+          refreshed['disabled'] != !disabled) {
+        throw const AccountManagementException(
+          'aborted',
+          'The account status did not match the requested change after refresh.',
+        );
+      }
+      setState(() {
+        _disabled[account.id] = refreshed['disabled'] as bool;
+        _error = null;
+      });
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$action completed.')));
     } catch (error) {
@@ -224,7 +244,9 @@ class _ManagedAccountTableState extends State<ManagedAccountTable> {
         roleLabel: widget.roleLabel,
         disabledFor: (a) => _disabled[a.id] ?? false,
         statusLabel: (a) => _disabled.containsKey(a.id)
-            ? (_disabled[a.id]! ? 'Disabled' : 'Enabled')
+            ? (_busy.contains(a.id)
+                  ? 'Updating…'
+                  : (_disabled[a.id]! ? 'Disabled' : 'Enabled'))
             : (_reading ? 'Checking…' : 'Unavailable'),
         canManage: (a) =>
             _api.canManage(a.id, widget.kind) &&

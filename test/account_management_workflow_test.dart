@@ -89,11 +89,15 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         var disabled = false;
+        var statusReads = 0;
         final mutations = <Map<String, dynamic>>[];
         final api = AccountManagementApi.mock(
           tokenProvider: () async => 'synthetic',
           transport: (data, _) async {
-            if (data['action'] == 'status') return {'disabled': disabled};
+            if (data['action'] == 'status') {
+              statusReads++;
+              return {'disabled': disabled};
+            }
             mutations.add(data);
             if (data['action'] == 'delete') return {'deleted': true};
             expect(data['expectedDisabled'], disabled);
@@ -135,6 +139,10 @@ void main() {
           await tester.pumpAndSettle();
         }
         expect(mutations.length, 3);
+        // Initial load, a fresh pre-confirmation read for each attempt (even
+        // the cancelled one), and an authoritative read after each success.
+        expect(statusReads, 8);
+        expect(find.text('Disabled'), findsOneWidget);
         expect(find.text('Delete'), findsNothing);
         expect(
           mutations.every((data) => data['action'] == 'setDisabled'),
@@ -153,10 +161,13 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       var attempts = 0;
+      var backendDisabled = false;
       final api = AccountManagementApi.mock(
         tokenProvider: () async => 'synthetic',
         transport: (data, _) async {
-          if (data['action'] == 'status') return {'disabled': false};
+          if (data['action'] == 'status') {
+            return {'disabled': backendDisabled};
+          }
           attempts++;
           if (attempts == 1) {
             throw const AccountManagementException(
@@ -164,7 +175,8 @@ void main() {
               'Change may be incomplete. Refresh status.',
             );
           }
-          return {'disabled': true};
+          backendDisabled = data['disabled'] as bool;
+          return {'disabled': backendDisabled};
         },
       );
       await tester.pumpWidget(
