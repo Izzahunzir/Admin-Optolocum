@@ -78,7 +78,9 @@ void main() {
               isA<AccountManagementException>().having(
                 (e) => e.code,
                 'code',
-                'failed-precondition',
+                action == 'delete'
+                    ? 'permission-denied'
+                    : 'failed-precondition',
               ),
             ),
           );
@@ -136,7 +138,7 @@ void main() {
   });
 
   testWidgets(
-    'Disable, Enable and Delete remain unavailable despite successful status reads',
+    'toggles remain gated and Delete is absent despite successful status reads',
     (tester) async {
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1;
@@ -166,7 +168,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.textContaining('disabled in Phase 1'), findsOneWidget);
+        expect(find.textContaining('Account changes are off.'), findsOneWidget);
         expect(
           find.text('Status source: localhost (read-only)'),
           findsOneWidget,
@@ -183,7 +185,7 @@ void main() {
           find.widgetWithText(OutlinedButton, disabled ? 'Enable' : 'Disable'),
           findsOneWidget,
         );
-        expect(find.widgetWithText(OutlinedButton, 'Delete'), findsOneWidget);
+        expect(find.widgetWithText(OutlinedButton, 'Delete'), findsNothing);
         for (final button in tester.widgetList<OutlinedButton>(
           find.byType(OutlinedButton),
         )) {

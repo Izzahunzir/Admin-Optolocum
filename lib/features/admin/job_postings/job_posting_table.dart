@@ -5,8 +5,16 @@ import '../widgets/account_action.dart';
 import 'job_posting.dart';
 
 class JobPostingTable extends StatelessWidget {
-  const JobPostingTable({super.key, required this.jobs});
+  const JobPostingTable({
+    super.key,
+    required this.jobs,
+    this.onDelete,
+    this.canDelete,
+    this.isDeleted,
+  });
   final List<JobPosting> jobs;
+  final ValueChanged<JobPosting>? onDelete;
+  final bool Function(JobPosting)? canDelete, isDeleted;
   @override
   Widget build(BuildContext context) => AdminTable(
     headers: [
@@ -32,7 +40,17 @@ class JobPostingTable extends StatelessWidget {
               DataCell(Text(j.timeRange)),
               DataCell(Text(j.rate)),
               DataCell(Text(j.contactNumber)),
-              DataCell(accountAction('Delete', Colors.red, null)),
+              DataCell(
+                (j.status == 'deleted' || isDeleted?.call(j) == true)
+                    ? const Text('Deleted')
+                    : accountAction(
+                        'Delete',
+                        Colors.red,
+                        onDelete != null && canDelete?.call(j) == true
+                            ? () => onDelete!(j)
+                            : null,
+                      ),
+              ),
             ],
           ),
         )

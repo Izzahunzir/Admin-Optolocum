@@ -278,7 +278,7 @@ class _AdminShellState extends State<AdminShell> {
                           Text(
                             _selected == 0
                                 ? 'Account profiles and job postings use Firestore · Profile trends use creation dates.'
-                                : 'Live job postings · Delete is unavailable in this phase.',
+                                : 'Job postings - Deleted postings and applications are retained for history.',
                             style: const TextStyle(
                               fontSize: 12,
                               color: Colors.blueGrey,

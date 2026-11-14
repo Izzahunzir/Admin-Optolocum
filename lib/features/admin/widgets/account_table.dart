@@ -11,7 +11,6 @@ class AccountTable extends StatelessWidget {
     this.showRole = false,
     this.readOnly = false,
     this.onToggle,
-    this.onDelete,
     this.roleLabel,
     this.canManage,
     this.disabledFor,
@@ -19,7 +18,7 @@ class AccountTable extends StatelessWidget {
   });
   final List<AccountRecord> accounts;
   final bool showRole, readOnly;
-  final ValueChanged<AccountRecord>? onToggle, onDelete;
+  final ValueChanged<AccountRecord>? onToggle;
   final String Function(AccountRecord)? roleLabel;
   final bool Function(AccountRecord)? canManage, disabledFor;
   final String Function(AccountRecord)? statusLabel;
@@ -57,16 +56,6 @@ class AccountTable extends StatelessWidget {
                               canManage?.call(a) == false
                           ? null
                           : () => onToggle!(a),
-                    ),
-                    const SizedBox(width: 8),
-                    accountAction(
-                      'Delete',
-                      Colors.red,
-                      readOnly ||
-                              onDelete == null ||
-                              canManage?.call(a) == false
-                          ? null
-                          : () => onDelete!(a),
                     ),
                     if (statusLabel != null)
                       Padding(

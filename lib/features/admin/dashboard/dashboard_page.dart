@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'application_tatistics_service.dart';
+import 'application_statistics_service.dart';
 import 'profile_registration_trend.dart';
 
 import '../locums/locum_service.dart';

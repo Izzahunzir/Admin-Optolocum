@@ -82,18 +82,22 @@ void main() {
 
   for (final kind in ['locum', 'practice_owner']) {
     testWidgets(
-      '$kind dialogs cancel, disable, enable and require typed UID for delete',
+      '$kind dialogs cancel, disable and enable with no Delete control',
       (tester) async {
         tester.view.physicalSize = const Size(1600, 1000);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
         var disabled = false;
+        var statusReads = 0;
         final mutations = <Map<String, dynamic>>[];
         final api = AccountManagementApi.mock(
           tokenProvider: () async => 'synthetic',
           transport: (data, _) async {
-            if (data['action'] == 'status') return {'disabled': disabled};
+            if (data['action'] == 'status') {
+              statusReads++;
+              return {'disabled': disabled};
+            }
             mutations.add(data);
             if (data['action'] == 'delete') return {'deleted': true};
             expect(data['expectedDisabled'], disabled);
@@ -135,23 +139,15 @@ void main() {
           await tester.pumpAndSettle();
         }
         expect(mutations.length, 3);
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Delete'));
-        await tester.pumpAndSettle();
-        final confirm = find.widgetWithText(TextButton, 'Delete');
-        expect(tester.widget<TextButton>(confirm).onPressed, isNull);
-        await tester.enterText(find.byType(TextField), 'wrong');
-        await tester.pump();
-        expect(tester.widget<TextButton>(confirm).onPressed, isNull);
-        await tester.enterText(find.byType(TextField), 'target');
-        await tester.pump();
-        await tester.tap(confirm);
-        await tester.pumpAndSettle();
-        expect(mutations.last, {
-          'uid': 'target',
-          'kind': kind,
-          'action': 'delete',
-          'confirmUid': 'target',
-        });
+        // Initial load, a fresh pre-confirmation read for each attempt (even
+        // the cancelled one), and an authoritative read after each success.
+        expect(statusReads, 8);
+        expect(find.text('Disabled'), findsOneWidget);
+        expect(find.text('Delete'), findsNothing);
+        expect(
+          mutations.every((data) => data['action'] == 'setDisabled'),
+          true,
+        );
         expect(tester.takeException(), isNull);
       },
     );
@@ -165,10 +161,13 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       var attempts = 0;
+      var backendDisabled = false;
       final api = AccountManagementApi.mock(
         tokenProvider: () async => 'synthetic',
         transport: (data, _) async {
-          if (data['action'] == 'status') return {'disabled': false};
+          if (data['action'] == 'status') {
+            return {'disabled': backendDisabled};
+          }
           attempts++;
           if (attempts == 1) {
             throw const AccountManagementException(
@@ -176,7 +175,8 @@ void main() {
               'Change may be incomplete. Refresh status.',
             );
           }
-          return {'disabled': true};
+          backendDisabled = data['disabled'] as bool;
+          return {'disabled': backendDisabled};
         },
       );
       await tester.pumpWidget(

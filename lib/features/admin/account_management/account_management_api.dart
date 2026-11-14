@@ -16,6 +16,8 @@ class AccountManagementApi {
     this.client,
     this.tokenProvider,
     this.baseUrl = const String.fromEnvironment('ACCOUNT_API_BASE_URL'),
+    this.demoMutations = const bool.fromEnvironment('FYP_DEMO_MUTATIONS'),
+    this.demoProject = const String.fromEnvironment('FYP_DEMO_PROJECT'),
   }) : _mockTransport = null;
 
   /// In-memory testing only: this path never uses HTTP or Cloud Functions.
@@ -26,6 +28,8 @@ class AccountManagementApi {
     required this.tokenProvider,
   }) : _mockTransport = transport,
        client = null,
+       demoMutations = false,
+       demoProject = '',
        baseUrl = 'mock';
 
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>, String)?
@@ -33,9 +37,21 @@ class AccountManagementApi {
   final http.Client? client;
   final Future<String?> Function()? tokenProvider;
   final String baseUrl;
+  final bool demoMutations;
+  final String demoProject;
+  final Set<(String, String)> _approvedTargets = {};
 
-  // Phase 1 cannot be enabled by dart-define or a server response.
-  bool get accountChangesEnabled => _mockTransport != null;
+  bool get deletionEnabled => _mockTransport != null;
+
+  // Both the explicit build gate and per-target backend approval are required.
+  bool get accountChangesEnabled =>
+      _mockTransport != null ||
+      (demoMutations &&
+          demoProject == 'optolocum-f314e' &&
+          baseUrl == 'http://127.0.0.1:8787');
+  bool canManage(String uid, String kind) =>
+      _mockTransport != null ||
+      (accountChangesEnabled && _approvedTargets.contains((uid, kind)));
 
   Future<Map<String, dynamic>> call(
     String uid,
@@ -45,10 +61,16 @@ class AccountManagementApi {
     bool? expectedDisabled,
     String? confirmUid,
   }) async {
-    if (action != 'status' && _mockTransport == null) {
+    if (action == 'delete' && !deletionEnabled) {
+      throw const AccountManagementException(
+        'permission-denied',
+        'Delete is blocked during the supervised Disable/Enable-only demo.',
+      );
+    }
+    if (action != 'status' && !canManage(uid, kind)) {
       throw const AccountManagementException(
         'failed-precondition',
-        'Account changes are disabled in Phase 1 pending security and Firestore session-access verification.',
+        'Account changes are off or this account is not approved for the supervised demo.',
       );
     }
     final data = <String, dynamic>{'uid': uid, 'kind': kind, 'action': action};
@@ -194,26 +216,42 @@ class AccountManagementApi {
       }
       final result = decoded['data'];
       if (result is! Map ||
-          result['disabled'] is! bool ||
-          result['mutationsEnabled'] != false) {
+          result['mutationsEnabled'] is! bool ||
+          (action == 'delete'
+              ? result['deleted'] != true
+              : result['disabled'] is! bool) ||
+          (action == 'setDisabled' && result['disabled'] != disabled)) {
         throw const FormatException();
+      }
+      if (accountChangesEnabled &&
+          result['mutationsEnabled'] == true &&
+          action != 'delete') {
+        _approvedTargets.add((uid, kind));
+      } else {
+        _approvedTargets.remove((uid, kind));
       }
       return Map<String, dynamic>.from(result);
     } on TimeoutException {
+      _approvedTargets.remove((uid, kind));
       throw const AccountManagementException(
         'unavailable',
         'Local server timed out. Check that it is running.',
       );
     } on http.ClientException {
+      _approvedTargets.remove((uid, kind));
       throw const AccountManagementException(
         'unavailable',
         'Cannot reach the local status API. Check the server, http://localhost:5173 origin, CORS and Chrome local-network permissions.',
       );
     } on FormatException {
+      _approvedTargets.remove((uid, kind));
       throw const AccountManagementException(
         'internal',
         'Invalid response from the local server.',
       );
+    } on AccountManagementException {
+      _approvedTargets.remove((uid, kind));
+      rethrow;
     } finally {
       if (client == null) requestClient.close();
     }
