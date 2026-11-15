@@ -20,37 +20,42 @@ proposal-only discussion below describes the earlier implementation stage and is
 superseded by this release record for the admin rules source only.
 
 POST /api/jobs/soft-delete is separate from account management. It accepts jobId
-and action=status, or action=softDelete with expectedStatus. It verifies a
+and action=status, softDelete, or restore with expectedStatus for mutations. It verifies a
 revocation-checked Firebase administrator token, current admin claim/enabled
 account, and (for mutation) five-minute recent authentication. Existing exact
 Host/Origin, loopback, JSON/body limits and shared serialization remain in force.
 
-The core checks the job allowlist again. A Firestore transaction updates only
-status=deleted, deletedAt=serverTimestamp and updatedAt=serverTimestamp. It never
-physically deletes a job or writes applications, summaries or account data.
-Already-deleted jobs are rejected without changing the first deletion timestamp.
-Failures are not automatically retried by Flutter; refresh authoritative status
-before manual recovery/retry. Internal transaction retries are handled by Firestore.
+The core rechecks the global job soft-delete permission. A Firestore transaction
+soft-deletes by recording the previous status and updating status, deletedAt and
+updatedAt. Undo Delete restores that previous status, retaining the job document,
+deletion timestamp, applications and summaries. A formerly available posting is
+restored as expired when its scheduled end has passed, or filled when an existing
+application is accepted, hired or completed. Other terminal statuses remain
+unchanged. Missing prior status or unverifiable schedule fails closed. It never
+physically deletes a job or writes application/history documents.
+Stale expected status and repeated actions fail. Flutter refreshes authoritative
+status before an action and reports errors without retrying automatically.
 
 ## Separate gates
 
-The ignored local configuration has NOT been changed. Optional backend fields
-are enableJobSoftDelete (default false) and approvedJobIds (default empty,
-maximum 20 unique explicit IDs). Enabled job permission requires a nonempty list.
-Existing account enableMutations, selectors and allowsOperation are unchanged.
-Account enablement cannot authorize job deletion or vice versa. No wildcard exists.
-A missing config file remains OFF. Restart is required after any approved config
-change. /health retains its existing account-gate summary, not job approval.
+The ignored local configuration has independent boolean fields
+enableAccountMutations and enableJobSoftDelete. Both default to false, including
+when the file is missing. When job soft deletion is enabled, any eligible job
+selected in the dashboard can be managed; there is no per-job ID list. Account
+permission cannot authorize job deletion or vice versa. Unknown and legacy
+per-target fields are rejected. Restart is required after a config change.
+/health reports both permission states without exposing identifiers.
 
-Flutter independently requires FYP_JOB_SOFT_DELETE=true, the existing exact
-FYP_DEMO_PROJECT and ACCOUNT_API_BASE_URL values, and an authenticated per-job
-status response advertising approval. The flag defaults false. The live app and
-backend have not been launched for this feature. No identifiers are recorded here.
+Flutter independently requires its explicit job action build flag, the exact
+FYP_DEMO_PROJECT and ACCOUNT_API_BASE_URL values, and an authenticated job
+status response advertising backend permission. The flag defaults false. The
+repository launch profile keeps both account and job action flags false. No
+identifiers are recorded here.
 
 ## Views and history
 
-The admin keeps all jobs and its nine-column table, confirmation and Delete-only
-action. Deleted rows show Deleted and cannot be deleted again. Practice Owners
+The admin keeps all jobs and its nine-column table, confirmation and one dynamic
+Delete/Undo Delete action per row. Practice Owners
 keep all postings, with deleted labels and an available-only active count. Locum
 available queries already require status=available. Open details and saved jobs
 now watch current status; missing/error/cache-only availability fails closed.

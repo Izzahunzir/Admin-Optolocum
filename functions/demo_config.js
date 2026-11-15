@@ -3,36 +3,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const PROJECT = 'optolocum-f314e';
 const CONFIG_PATH = path.join(__dirname, '.demo-local.json');
+const KEYS = new Set(['projectId', 'enableAccountMutations', 'enableJobSoftDelete']);
+
 function parseDemoConfig(value) {
-  if (!value || Array.isArray(value) || Object.keys(value).some(key => !['projectId', 'enableMutations', 'approvedTestUids', 'locumTestUid', 'practiceOwnerTestUid', 'enableJobSoftDelete', 'approvedJobIds'].includes(key)) ||
-      value.projectId !== PROJECT || typeof value.enableMutations !== 'boolean' || !Array.isArray(value.approvedTestUids) ||
-      value.approvedTestUids.length > 20 || value.approvedTestUids.some(uid => typeof uid !== 'string' ||
-        !/^[^/\s\x00-\x1f\x7f]{1,128}$/.test(uid) || ['.', '..', '*'].includes(uid)) ||
-      new Set(value.approvedTestUids).size !== value.approvedTestUids.length ||
-      ('locumTestUid' in value && !value.approvedTestUids.includes(value.locumTestUid)) ||
-      ('practiceOwnerTestUid' in value && (!value.approvedTestUids.includes(value.practiceOwnerTestUid) || value.practiceOwnerTestUid === value.locumTestUid)) ||
-      (value.enableMutations && !value.approvedTestUids.includes(value.locumTestUid)))
-    throw new Error('Invalid demo configuration. Exact project, boolean gate, unique test UIDs and an approved locumTestUid before enabling are required.');
-  const jobIds = value.approvedJobIds ?? [];
-  if (('approvedJobIds' in value && !Array.isArray(value.approvedJobIds)) ||
-      ('enableJobSoftDelete' in value && typeof value.enableJobSoftDelete !== 'boolean') ||
-      !Array.isArray(jobIds) || jobIds.length > 20 || new Set(jobIds).size !== jobIds.length ||
-      jobIds.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) ||
-      (value.enableJobSoftDelete === true && jobIds.length === 0)) throw new Error('Invalid job demo configuration.');
-  const approvedJobs = new Set(jobIds);
-  const approved = new Set(value.approvedTestUids);
-  const enabled = value.enableMutations, selectedLocumUid = value.locumTestUid, selectedOwnerUid = value.practiceOwnerTestUid;
-  const allows = uid => enabled && approved.has(uid) && (uid === selectedLocumUid || uid === selectedOwnerUid);
-  return Object.freeze({ enabled, allows,
-    allowsJob: id => value.enableJobSoftDelete === true && approvedJobs.has(id),
-    allowsOperation: (uid, kind, action) => allows(uid) && action === 'setDisabled' &&
-      ((kind === 'locum' && uid === selectedLocumUid) || (kind === 'practice_owner' && uid === selectedOwnerUid)) });
+  if (!value || Array.isArray(value) || Object.keys(value).some(key => !KEYS.has(key)) ||
+      value.projectId !== PROJECT ||
+      ('enableAccountMutations' in value && typeof value.enableAccountMutations !== 'boolean') ||
+      ('enableJobSoftDelete' in value && typeof value.enableJobSoftDelete !== 'boolean')) {
+    throw new Error('Invalid local demo configuration. Use the exact project and independent boolean mutation gates.');
+  }
+  const accountMutationsEnabled = value.enableAccountMutations === true;
+  const jobSoftDeleteEnabled = value.enableJobSoftDelete === true;
+  return Object.freeze({
+    accountMutationsEnabled,
+    jobSoftDeleteEnabled,
+  });
 }
+
 function loadDemoConfig() {
-  if (!fs.existsSync(CONFIG_PATH)) return parseDemoConfig({ projectId: PROJECT, enableMutations: false, approvedTestUids: [] });
+  if (!fs.existsSync(CONFIG_PATH)) return parseDemoConfig({ projectId: PROJECT });
   try { return parseDemoConfig(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))); }
   catch { throw new Error('Invalid local demo configuration; server not started.'); }
 }
+
 function assertLocalServerEnvironment(env = process.env, isFile = file => {
   try { return fs.statSync(file).isFile(); } catch { return false; }
 }) {

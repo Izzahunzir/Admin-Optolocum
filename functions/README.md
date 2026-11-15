@@ -7,7 +7,7 @@ Account tables have no Delete controls. Backend deletion protections remain inta
 
 Run npm.cmd run start:local from this directory only when the local demo is
 intended. The server binds 127.0.0.1:8787 and accepts the dashboard browser origin
-http://localhost:5173. Configuration is read at startup; Flutter and backend gates
+http://localhost:5174. Configuration is read at startup; Flutter and backend gates
 are independent. Never commit credentials or local account selectors.
 
 Offline validation: npm.cmd test; isolated Auth/Firestore tests:

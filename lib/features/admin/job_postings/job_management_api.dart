@@ -21,13 +21,23 @@ class JobManagementApi {
       project == 'optolocum-f314e' &&
       baseUrl == 'http://127.0.0.1:8787';
   final Set<String> _approved = {};
-  bool canDelete(String id) => configured && _approved.contains(id);
-  Future<Map<String, dynamic>> call(String id, {String? expectedStatus}) async {
-    if (!configured || (expectedStatus != null && !canDelete(id))) {
-      throw StateError('Job deletion is off or not approved.');
+  bool canChangeStatus(String id) => configured && _approved.contains(id);
+  Future<Map<String, dynamic>> call(
+    String id, {
+    String action = 'status',
+    String? expectedStatus,
+  }) async {
+    if (!['status', 'softDelete', 'restore'].contains(action) ||
+        (action == 'status' && expectedStatus != null) ||
+        (action != 'status' && expectedStatus == null) ||
+        (action == 'restore' && expectedStatus != 'deleted')) {
+      throw StateError('Invalid job status action.');
     }
-    if (kIsWeb && Uri.base.origin != 'http://localhost:5173') {
-      throw StateError('Open the dashboard at http://localhost:5173.');
+    if (!configured || (action != 'status' && !canChangeStatus(id))) {
+      throw StateError('Job status changes are off or not approved.');
+    }
+    if (kIsWeb && Uri.base.origin != 'http://localhost:5174') {
+      throw StateError('Open the dashboard at http://localhost:5174.');
     }
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,128}$').hasMatch(id)) {
       throw StateError('Invalid job ID.');
@@ -50,7 +60,7 @@ class JobManagementApi {
             })
             ..body = jsonEncode({
               'jobId': id,
-              'action': expectedStatus == null ? 'status' : 'softDelete',
+              'action': action,
               'expectedStatus': ?expectedStatus,
             });
       final response = await transport
@@ -69,10 +79,11 @@ class JobManagementApi {
       if (data is! Map ||
           data['status'] is! String ||
           data['mutationsEnabled'] is! bool ||
-          (expectedStatus != null && data['status'] != 'deleted')) {
+          (action == 'softDelete' && data['status'] != 'deleted') ||
+          (action == 'restore' && data['status'] == 'deleted')) {
         throw StateError('Invalid job response.');
       }
-      if (data['mutationsEnabled'] == true && data['status'] != 'deleted') {
+      if (data['mutationsEnabled'] == true) {
         _approved.add(id);
       } else {
         _approved.remove(id);

@@ -23,19 +23,21 @@ void main() {
     'job approval, payload and failures are scoped to the selected posting',
     () async {
       var fail = false;
+      final statuses = <String, String>{};
       final client = MockClient((request) async {
         expect(request.followRedirects, false);
         expect(request.headers['Authorization'], 'Bearer synthetic');
         final data = jsonDecode(request.body) as Map;
         if (fail) return http.Response('{}', 503);
+        final id = data['jobId'] as String;
+        final action = data['action'] as String;
+        if (action == 'softDelete') statuses[id] = 'deleted';
+        if (action == 'restore') statuses[id] = 'available';
         return http.Response(
           jsonEncode({
             'data': {
-              'status': data['action'] == 'softDelete'
-                  ? 'deleted'
-                  : 'available',
-              'mutationsEnabled':
-                  data['jobId'] == 'approved' && data['action'] == 'status',
+              'status': statuses[id] ?? 'available',
+              'mutationsEnabled': true,
             },
           }),
           200,
@@ -53,18 +55,30 @@ void main() {
         throwsStateError,
       );
       await api.call('other');
-      expect(api.canDelete('other'), false);
-      await api.call('approved');
-      expect(api.canDelete('approved'), true);
-      await api.call('approved', expectedStatus: 'available');
-      expect(api.canDelete('approved'), false);
-      await api.call('approved');
+      expect(api.canChangeStatus('other'), true);
+      for (final id in ['job-a', 'job-b']) {
+        await api.call(id);
+        expect(api.canChangeStatus(id), true);
+        final deleted = await api.call(
+          id,
+          action: 'softDelete',
+          expectedStatus: 'available',
+        );
+        expect(deleted['status'], 'deleted');
+        expect(api.canChangeStatus(id), true);
+        final restored = await api.call(
+          id,
+          action: 'restore',
+          expectedStatus: 'deleted',
+        );
+        expect(restored['status'], 'available');
+      }
       fail = true;
       await expectLater(
-        api.call('approved', expectedStatus: 'available'),
+        api.call('job-a', action: 'softDelete', expectedStatus: 'available'),
         throwsStateError,
       );
-      expect(api.canDelete('approved'), false);
+      expect(api.canChangeStatus('job-a'), false);
       client.close();
     },
   );
@@ -76,16 +90,22 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       var status = 'available', mutations = 0;
+      final existingApplications = <String>['job_application'];
+      final originalApplications = List<String>.of(existingApplications);
       final client = MockClient((request) async {
         final data = jsonDecode(request.body) as Map;
         if (data['action'] == 'softDelete') {
           expect(data['expectedStatus'], 'available');
           status = 'deleted';
           mutations++;
+        } else if (data['action'] == 'restore') {
+          expect(data['expectedStatus'], 'deleted');
+          status = 'available';
+          mutations++;
         }
         return http.Response(
           jsonEncode({
-            'data': {'status': status, 'mutationsEnabled': status != 'deleted'},
+            'data': {'status': status, 'mutationsEnabled': true},
           }),
           200,
         );
@@ -129,8 +149,28 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, 'Delete'));
       await tester.pumpAndSettle();
       expect(mutations, 1);
-      expect(find.text('Deleted'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, 'Delete'), findsNothing);
+      expect(
+        find.widgetWithText(OutlinedButton, 'Undo Delete'),
+        findsOneWidget,
+      );
+      expect(existingApplications, originalApplications);
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Undo Delete'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(mutations, 1);
+      expect(
+        find.widgetWithText(OutlinedButton, 'Undo Delete'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Undo Delete'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'Undo Delete'));
+      await tester.pumpAndSettle();
+      expect(mutations, 2);
+      expect(status, 'available');
+      expect(existingApplications, originalApplications);
+      expect(find.widgetWithText(OutlinedButton, 'Delete'), findsOneWidget);
     },
   );
 }

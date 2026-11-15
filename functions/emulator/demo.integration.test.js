@@ -7,8 +7,9 @@ const { assertEmulatorEnvironment, createEmulatorServices, AUTH_HOST } = require
 const { createLocalApp } = require('../local_app');
 const { parseDemoConfig, PROJECT } = require('../demo_config');
 const { manageAccount } = require('../management');
+const { manageJob } = require('../job_management');
 assertEmulatorEnvironment();
-test('two-role restricted demo backend with synthetic Firebase services', { timeout: 120000 }, async t => {
+test('dynamic account and job permissions with synthetic Firebase services', { timeout: 120000 }, async t => {
   const { app, auth, db } = createEmulatorServices();
   t.after(async () => { await db.terminate(); await require('firebase-admin/app').deleteApp(app); });
   const prefix = `restricted-${Date.now()}-`, password = 'Synthetic-Only-123!';
@@ -21,7 +22,8 @@ test('two-role restricted demo backend with synthetic Firebase services', { time
   }
   const admin = await seed('admin', 'locum', { admin: true }), locum = await seed('locum', 'locum', { role: 'locum' }), owner = await seed('owner', 'practice_owner');
   const other = await seed('other-owner', 'practice_owner');
-  const config = { projectId: PROJECT, enableMutations: true, approvedTestUids: [locum, owner, other], locumTestUid: locum, practiceOwnerTestUid: owner, enableJobSoftDelete: true, approvedJobIds: [prefix + 'job'] };
+  const otherLocum = await seed('other-locum', 'locum', { role: 'locum' });
+  const config = { projectId: PROJECT, enableAccountMutations: true, enableJobSoftDelete: true };
   const policy = parseDemoConfig(config);
   async function signIn(uid) {
     const res = await fetch(`http://${AUTH_HOST}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=synthetic`, {
@@ -31,7 +33,7 @@ test('two-role restricted demo backend with synthetic Firebase services', { time
   const adminToken = (await signIn(admin)).data.idToken, userToken = (await signIn(locum)).data.idToken;
   const server = createLocalApp({ auth, db, demoPolicy: policy }).listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
-  function request(data, token = adminToken, origin = 'http://localhost:5173', apiPath = '/api/accounts/manage') {
+  function request(data, token = adminToken, origin = 'http://localhost:5174', apiPath = '/api/accounts/manage') {
     return new Promise((resolve, reject) => {
       const req = http.request({ hostname: '127.0.0.1', port: server.address().port, path: apiPath, method: 'POST',
         headers: { Host: '127.0.0.1:8787', Origin: origin, 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) } }, res => {
@@ -52,11 +54,14 @@ test('two-role restricted demo backend with synthetic Firebase services', { time
     assert.equal((await request(disable())).status, 403);
     await auth.setCustomUserClaims(admin, { admin: true });
   });
-  await t.test('status exposes capability only for the selected role and UID', async () => {
+  await t.test('status exposes global account capability for dynamically selected accounts', async () => {
     assert.equal((await request(status(locum))).body.data.mutationsEnabled, true);
     assert.equal((await request(status(owner, 'practice_owner'))).body.data.mutationsEnabled, true);
-    assert.equal((await request(disable(other, 'practice_owner'))).status, 403);
-    assert.equal((await request(disable(locum, 'practice_owner'))).status, 403);
+    assert.equal((await request(status(otherLocum))).body.data.mutationsEnabled, true);
+    assert.equal((await request(status(other, 'practice_owner'))).body.data.mutationsEnabled, true);
+    const wrongKind = await request(disable(locum, 'practice_owner'));
+    assert.equal(wrongKind.status, 404);
+    assert.equal(wrongKind.body.error.code, 'not-found');
     assert.equal((await auth.getUser(owner)).disabled, false);
   });
   await t.test('HTTP Disable and Enable work while claims and verification remain unchanged', async () => {
@@ -88,8 +93,16 @@ test('two-role restricted demo backend with synthetic Firebase services', { time
     assert.deepEqual((await profile.get()).data(), before);
     assert.deepEqual((await auth.getUser(owner)).customClaims, claims);
     assert.deepEqual((await job.get()).data(), { clinicOwnerId: owner, status: 'open' });
-    await assert.rejects(core(disable(owner, 'locum')), { code: 'permission-denied' });
+    await assert.rejects(core(disable(owner, 'locum')), { code: 'not-found' });
     await assert.rejects(core(disable(owner, 'practice_owner'), { actor: { ...actor(), auth_time: actor().auth_time - 301 } }), { code: 'unauthenticated' });
+  });
+  await t.test('second eligible Locum and Practice Owner IDs both support Disable and Enable', async () => {
+    for (const [uid, kind] of [[otherLocum, 'locum'], [other, 'practice_owner']]) {
+      assert.equal((await request(disable(uid, kind))).status, 200);
+      assert.equal((await auth.getUser(uid)).disabled, true);
+      assert.equal((await request({ ...disable(uid, kind), disabled: false, expectedDisabled: true })).status, 200);
+      assert.equal((await auth.getUser(uid)).disabled, false);
+    }
   });
   await t.test('Delete is explicitly denied even with disabled target, valid admin and exact UID confirmation', async () => {
     await request(disable());
@@ -101,31 +114,29 @@ test('two-role restricted demo backend with synthetic Firebase services', { time
     assert.equal((await db.collection('locum_profiles').doc(locum).get()).exists, true);
     await request({ ...disable(), disabled: false, expectedDisabled: true });
   });
-  await t.test('core rejects nonselected UIDs, owner kind and stale administrator authentication', async () => {
-    await assert.rejects(core(disable(other, 'practice_owner')), { code: 'permission-denied' });
-    await assert.rejects(core(disable(locum, 'practice_owner')), { code: 'permission-denied' });
+  await t.test('core allows dynamic IDs while enforcing matching profile kind, gate and fresh authentication', async () => {
+    await assert.rejects(core(disable(locum, 'practice_owner')), { code: 'not-found' });
     await assert.rejects(core(disable(), { actor: { ...actor(), auth_time: actor().auth_time - 301 } }), { code: 'unauthenticated' });
-    const off = parseDemoConfig({ ...config, enableMutations: false });
+    const off = parseDemoConfig({ ...config, enableAccountMutations: false });
     await assert.rejects(core(disable(), { demoPolicy: off }), { code: 'permission-denied' });
     assert.equal((await auth.getUser(locum)).disabled, false);
   });
   await t.test('self and administrator protections still apply to a mistakenly selected UID', async () => {
-    const adminPolicy = parseDemoConfig({ ...config, approvedTestUids: [admin, owner], locumTestUid: admin });
-    await assert.rejects(core(disable(admin), { demoPolicy: adminPolicy }), /own account/);
+    await assert.rejects(core(disable(admin)), /own account/);
     await auth.setCustomUserClaims(locum, { admin: true });
     await assert.rejects(core(disable()), /protected/);
     await auth.setCustomUserClaims(locum, { role: 'locum' });
   });
   await t.test('malformed requests and missing selected users fail without mutation', async () => {
     assert.equal((await request({ ...disable(), extra: true })).status, 400);
-    const uid = prefix + 'missing', missingPolicy = parseDemoConfig({ ...config, approvedTestUids: [uid, owner], locumTestUid: uid });
-    await assert.rejects(core(disable(uid), { demoPolicy: missingPolicy }), { code: 'auth/user-not-found' });
+    const uid = prefix + 'missing';
+    await assert.rejects(core(disable(uid)), { code: 'auth/user-not-found' });
   });
   await t.test('job HTTP soft deletion preserves fields, applications and summaries and blocks repeats', async () => {
     const jobId = prefix + 'job', jobRef = db.collection('job_postings').doc(jobId);
     const appRef = db.collection('applications').doc(jobId + '_' + locum);
     const summaryRef = db.collection('application_applicant_summaries').doc(appRef.id);
-    const original = { clinicOwnerId: owner, status: 'available', placeName: 'Synthetic Practice', extra: { historical: true } };
+    const original = { clinicOwnerId: owner, status: 'available', jobDate: new Date(Date.now() + 2 * 86400000), endTime: '23:59', placeName: 'Synthetic Practice', extra: { historical: true } };
     const application = { jobId, locumId: locum, clinicOwnerId: owner, status: 'pending' };
     await jobRef.set(original); await appRef.set(application); await summaryRef.set({ fullName: 'Synthetic' });
     const call = (data, token = adminToken, origin) => request(data, token, origin, '/api/jobs/soft-delete');
@@ -133,7 +144,11 @@ test('two-role restricted demo backend with synthetic Firebase services', { time
     assert.equal((await call(data, null)).status, 401);
     assert.equal((await call(data, (await signIn(locum)).data.idToken)).status, 403);
     assert.equal((await call(data, adminToken, 'https://example.invalid')).status, 403);
-    assert.equal((await call({ ...data, jobId: 'not-approved' })).status, 409);
+    const secondJobId = prefix + 'another-job';
+    await db.collection('job_postings').doc(secondJobId).set({ clinicOwnerId: owner, status: 'open' });
+    assert.equal((await call({ jobId: secondJobId, action: 'status' })).body.data.mutationsEnabled, true);
+    assert.equal((await call({ jobId: secondJobId, action: 'softDelete', expectedStatus: 'open' })).status, 200);
+    assert.equal((await db.collection('job_postings').doc(secondJobId).get()).data().status, 'deleted');
     assert.equal((await call({ jobId, action: 'status' })).body.data.mutationsEnabled, true);
     assert.equal((await call(data)).status, 200);
     const after = (await jobRef.get()).data();
@@ -144,6 +159,14 @@ test('two-role restricted demo backend with synthetic Firebase services', { time
     assert.equal((await call(data)).status, 409);
     assert.equal((await jobRef.get()).data().deletedAt.toMillis(), after.deletedAt.toMillis());
     assert.equal((await db.collection('job_postings').where('status', '==', 'available').get()).docs.some(doc => doc.id === jobId), false);
+    const restored = await call({ jobId, action: 'restore', expectedStatus: 'deleted' });
+    assert.equal(restored.status, 200);
+    assert.equal(restored.body.data.status, 'available');
+    assert.equal((await jobRef.get()).data().status, 'available');
+    assert.deepEqual((await appRef.get()).data(), application);
+    assert.deepEqual((await summaryRef.get()).data(), { fullName: 'Synthetic' });
+    const jobsOff = parseDemoConfig({ ...config, enableJobSoftDelete: false });
+    await assert.rejects(manageJob({ auth, db, actor: actor(), demoPolicy: jobsOff, data: { jobId: prefix + 'unlisted', action: 'softDelete', expectedStatus: 'open' } }), { code: 'failed-precondition' });
   });
   await t.test('revocation failure remains explicit and does not trigger automatic Enable or retry', async () => {
     let updates = 0;

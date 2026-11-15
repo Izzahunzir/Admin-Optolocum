@@ -1,7 +1,7 @@
 # Isolated account-management emulator tests
 
-The current launcher runs the legacy management integration suite plus the restricted
-two-role FYP demo suite through local_app.js. See [../FYP_DEMO.md](../FYP_DEMO.md).
+The current launcher runs the legacy management integration suite plus the dynamic
+account/job permission demo suite through local_app.js. See [../FYP_DEMO.md](../FYP_DEMO.md).
 The obsolete standalone provisioning test has been removed. Legacy management tests retain deletion coverage
 in synthetic emulators only; the supervised local backend still rejects Delete.
 

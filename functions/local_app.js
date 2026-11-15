@@ -1,11 +1,11 @@
-﻿"use strict";
+"use strict";
 const express = require('express');
 const { manageJob } = require('./job_management');
 const { manageAccount, ManagementError } = require('./management');
 
 const HOST = '127.0.0.1';
 const PORT = 8787;
-const ORIGIN = 'http://localhost:5173';
+const ORIGIN = 'http://localhost:5174';
 const API_PATH = '/api/accounts/manage';
 
 function createSerialExecutor() {
@@ -48,7 +48,11 @@ function createLocalApp({ auth, db, manager = manageAccount, demoPolicy = null }
     next();
   });
   // Liveness only: this exposes no Firebase credentials, identities or account data.
-  app.get('/health', (req, res) => res.json({ status: 'ok', mode: demoPolicy?.enabled ? 'supervised-demo' : 'read-only', mutationsEnabled: demoPolicy?.enabled === true }));
+  app.get('/health', (req, res) => {
+    const accountMutationsEnabled = demoPolicy?.accountMutationsEnabled === true;
+    const jobSoftDeleteEnabled = demoPolicy?.jobSoftDeleteEnabled === true;
+    return res.json({ status: 'ok', mode: accountMutationsEnabled || jobSoftDeleteEnabled ? 'supervised-demo' : 'read-only', accountMutationsEnabled, jobSoftDeleteEnabled });
+  });
   app.post([API_PATH, '/api/jobs/soft-delete'], (req, res, next) => {
     if (Object.keys(req.query).length) return reject(res, 400, 'invalid-argument', 'Query parameters are not allowed.');
     if (!req.is('application/json')) return reject(res, 415, 'invalid-argument', 'Content-Type must be application/json.');
@@ -75,11 +79,11 @@ function createLocalApp({ auth, db, manager = manageAccount, demoPolicy = null }
           ('confirmUid' in data && typeof data.confirmUid !== 'string')) return reject(res, 400, 'invalid-argument', 'Invalid account request.');
       // Temporary first-live-test restriction. No config value can enable Delete.
       if (data.action === 'delete') return reject(res, 403, 'permission-denied', 'Delete is blocked during the supervised Disable/Enable-only test.');
-      const approved = demoPolicy?.enabled === true && demoPolicy.allowsOperation?.(data.uid, data.kind, 'setDisabled') === true;
-      if (data.action !== 'status' && !approved) return reject(res, 403, 'failed-precondition', 'Account changes are off or this target is not approved for the supervised demo.');
+      const mutationsEnabled = demoPolicy?.accountMutationsEnabled === true;
+      if (data.action !== 'status' && !mutationsEnabled) return reject(res, 403, 'failed-precondition', 'Account changes are off.');
       if (data.action === 'status' && Object.keys(data).some(key => !['uid', 'kind', 'action'].includes(key))) return reject(res, 400, 'invalid-argument', 'Unexpected status request fields.');
       const result = await serialized(() => manager({ auth, db, actor, data, demoPolicy }));
-      return res.json({ data: { ...result, mutationsEnabled: approved } });
+      return res.json({ data: { ...result, mutationsEnabled } });
     } catch (error) {
       if (error instanceof ManagementError) {
         const status = { 'permission-denied': 403, 'unauthenticated': 401, 'not-found': 404, 'invalid-argument': 400 }[error.code] || 409;
