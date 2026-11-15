@@ -8,13 +8,14 @@ class JobPostingTable extends StatelessWidget {
   const JobPostingTable({
     super.key,
     required this.jobs,
-    this.onDelete,
-    this.canDelete,
-    this.isDeleted,
+    this.onChangeStatus,
+    this.canChangeStatus,
+    this.statusOf,
   });
   final List<JobPosting> jobs;
-  final ValueChanged<JobPosting>? onDelete;
-  final bool Function(JobPosting)? canDelete, isDeleted;
+  final ValueChanged<JobPosting>? onChangeStatus;
+  final bool Function(JobPosting)? canChangeStatus;
+  final String Function(JobPosting)? statusOf;
   @override
   Widget build(BuildContext context) => AdminTable(
     headers: [
@@ -40,20 +41,22 @@ class JobPostingTable extends StatelessWidget {
               DataCell(Text(j.timeRange)),
               DataCell(Text(j.rate)),
               DataCell(Text(j.contactNumber)),
-              DataCell(
-                (j.status == 'deleted' || isDeleted?.call(j) == true)
-                    ? const Text('Deleted')
-                    : accountAction(
-                        'Delete',
-                        Colors.red,
-                        onDelete != null && canDelete?.call(j) == true
-                            ? () => onDelete!(j)
-                            : null,
-                      ),
-              ),
+              DataCell(_jobAction(j)),
             ],
           ),
         )
         .toList(),
   );
+
+  Widget _jobAction(JobPosting job) {
+    final deleted = (statusOf?.call(job) ?? job.status) == 'deleted';
+    final label = deleted ? 'Undo Delete' : 'Delete';
+    return accountAction(
+      label,
+      deleted ? Colors.orange : Colors.red,
+      onChangeStatus != null && canChangeStatus?.call(job) == true
+          ? () => onChangeStatus!(job)
+          : null,
+    );
+  }
 }

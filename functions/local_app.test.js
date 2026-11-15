@@ -47,7 +47,7 @@ test('health is read-only, non-sensitive, and needs no Firebase request', async 
   const f = await fixture(t);
   const r = await f.request({ method: 'GET', path: '/health', origin: null, token: null });
   assert.equal(r.status, 200);
-  assert.deepEqual(r.json, { status: 'ok', mode: 'read-only', mutationsEnabled: false });
+  assert.deepEqual(r.json, { status: 'ok', mode: 'read-only', accountMutationsEnabled: false, jobSoftDeleteEnabled: false });
   assert.equal(f.checks.length, 0);
   assert.equal(r.headers['cache-control'], 'no-store');
 });

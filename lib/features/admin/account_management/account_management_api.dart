@@ -163,10 +163,10 @@ class AccountManagementApi {
         'The local API URL must be http://127.0.0.1:8787.',
       );
     }
-    if (kIsWeb && Uri.base.origin != 'http://localhost:5173') {
+    if (kIsWeb && Uri.base.origin != 'http://localhost:5174') {
       throw const AccountManagementException(
         'origin-not-allowed',
-        'Open the dashboard at http://localhost:5173 to use the local status API.',
+        'Open the dashboard at http://localhost:5174 to use the local status API.',
       );
     }
     final String? token;
@@ -241,7 +241,7 @@ class AccountManagementApi {
       _approvedTargets.remove((uid, kind));
       throw const AccountManagementException(
         'unavailable',
-        'Cannot reach the local status API. Check the server, http://localhost:5173 origin, CORS and Chrome local-network permissions.',
+        'Cannot reach the local status API. Check the server, http://localhost:5174 origin, CORS and Chrome local-network permissions.',
       );
     } on FormatException {
       _approvedTargets.remove((uid, kind));

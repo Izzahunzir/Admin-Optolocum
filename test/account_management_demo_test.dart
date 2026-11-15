@@ -100,7 +100,7 @@ void main() {
   });
 
   test(
-    'HTTP demo scopes approval by role, supports both roles and blocks Delete',
+    'HTTP demo supports dynamically selected account IDs for both roles and blocks Delete',
     () async {
       var disabled = false;
       final actions = <String>[];
@@ -115,7 +115,7 @@ void main() {
           jsonEncode({
             'data': {
               if (action == 'delete') 'deleted': true else 'disabled': disabled,
-              'mutationsEnabled': data['uid'] == 'approved',
+              'mutationsEnabled': true,
             },
           }),
           200,
@@ -135,7 +135,7 @@ void main() {
       );
       expect(actions, isEmpty);
       await api.call('other', 'locum', 'status');
-      expect(api.canManage('other', 'locum'), false);
+      expect(api.canManage('other', 'locum'), true);
       await api.call('approved', 'locum', 'status');
       expect(api.canManage('approved', 'locum'), true);
       expect(api.canManage('approved', 'practice_owner'), false);
@@ -149,11 +149,16 @@ void main() {
         ),
         throwsA(isA<AccountManagementException>()),
       );
-      for (final kind in ['locum', 'practice_owner']) {
-        await api.call('approved', kind, 'status');
-        expect(api.canManage('approved', kind), true);
+      for (final (uid, kind) in [
+        ('locum-a', 'locum'),
+        ('locum-b', 'locum'),
+        ('owner-a', 'practice_owner'),
+        ('owner-b', 'practice_owner'),
+      ]) {
+        await api.call(uid, kind, 'status');
+        expect(api.canManage(uid, kind), true);
         await api.call(
-          'approved',
+          uid,
           kind,
           'setDisabled',
           disabled: true,
@@ -161,7 +166,7 @@ void main() {
         );
         expect(disabled, true);
         await api.call(
-          'approved',
+          uid,
           kind,
           'setDisabled',
           disabled: false,

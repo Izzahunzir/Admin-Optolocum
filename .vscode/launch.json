@@ -8,8 +8,8 @@
       "deviceId": "chrome",
       "program": "lib/main.dart",
       "toolArgs": [
-        "--web-port=5173",
-        "--dart-define=FYP_DEMO_MUTATIONS=true",
+        "--web-port=5174",
+        "--dart-define=FYP_DEMO_MUTATIONS=false",
         "--dart-define=FYP_DEMO_PROJECT=optolocum-f314e",
         "--dart-define=FYP_JOB_SOFT_DELETE=true",
         "--dart-define=ACCOUNT_API_BASE_URL=http://127.0.0.1:8787"

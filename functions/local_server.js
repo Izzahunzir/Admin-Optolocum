@@ -11,7 +11,8 @@ try {
   const demoPolicy = loadDemoConfig(); // Missing file = OFF. Invalid file fails before SDK initialization.
   initializeApp({ credential: applicationDefault(), projectId: 'optolocum-f314e' });
   const app = createLocalApp({ auth: getAuth(), db: getFirestore(), demoPolicy });
-  const server = app.listen(PORT, HOST, () => console.log(`Local account API (${demoPolicy.enabled ? 'supervised-demo' : 'read-only'}): http://${HOST}:${PORT} (allowed origin: http://localhost:5173)`));
+  const enabled = demoPolicy.accountMutationsEnabled || demoPolicy.jobSoftDeleteEnabled;
+  const server = app.listen(PORT, HOST, () => console.log(`Local account API (${enabled ? 'supervised-demo' : 'read-only'}): http://${HOST}:${PORT} (allowed origin: http://localhost:5174)`));
   server.requestTimeout = 30000;
   server.headersTimeout = 10000;
   server.keepAliveTimeout = 5000;

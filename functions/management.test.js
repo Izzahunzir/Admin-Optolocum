@@ -5,9 +5,11 @@ const { manageAccount, DELETE_WAIT_MS } = require('./management');
 
 function fixture(options = {}) {
   const now = Date.now();
+  const targetUid = options.targetUid || 'target';
+  const kind = options.kind || 'locum';
   const users = {
     admin: { disabled: false, customClaims: { admin: true } },
-    target: { disabled: false, customClaims: { role: 'locum' }, tokensValidAfterTime: new Date(now - 2 * DELETE_WAIT_MS).toISOString() },
+    [targetUid]: { disabled: false, customClaims: { role: kind }, tokensValidAfterTime: new Date(now - 2 * DELETE_WAIT_MS).toISOString() },
   };
   const mutations = [];
   let dependencies = false;
@@ -21,13 +23,13 @@ function fixture(options = {}) {
   };
   const db = {
     collection: name => ({
-      doc: uid => ({ get: async () => ({ exists: profileExists }), listCollections: async () => options.nested ? [{}] : [], path: `${name}/${uid}` }),
+      doc: uid => ({ get: async () => ({ exists: profileExists && name === (kind === 'locum' ? 'locum_profiles' : 'practice_owner_profiles') }), listCollections: async () => options.nested ? [{}] : [], path: `${name}/${uid}` }),
       where: () => ({ limit: () => ({ get: async () => ({ empty: !dependencies }) }) }),
     }),
     batch: () => ({ delete: ref => mutations.push(ref.path), commit: async () => { if (options.cleanupFailure) throw new Error('private'); } }),
   };
-  const run = data => manageAccount({ auth, db, actor: { uid: 'admin', admin: true, auth_time: now / 1000, ...options.actor }, data: { uid: 'target', kind: 'locum', ...data }, now });
-  return { auth, users, mutations, run, now, setDependencies: value => { dependencies = value; }, setProfile: value => { profileExists = value; } };
+  const run = data => manageAccount({ auth, db, actor: { uid: 'admin', admin: true, auth_time: now / 1000, ...options.actor }, data: { uid: targetUid, kind, ...data }, now, demoPolicy: options.demoPolicy });
+  return { auth, users, mutations, run, now, targetUid, kind, setDependencies: value => { dependencies = value; }, setProfile: value => { profileExists = value; } };
 }
 
 test('disable and enable use Authentication, preserve claims, and revoke sessions', async () => {
@@ -91,7 +93,7 @@ test('invalid target identifiers and missing profiles fail without writes', asyn
 
 test('both account kinds support transitions and reject duplicate retries', async () => {
   for (const kind of ['locum', 'practice_owner']) {
-    const f = fixture();
+    const f = fixture({ kind });
     const request = { kind, action: 'setDisabled', disabled: true, expectedDisabled: false };
     await f.run(request);
     const count = f.mutations.length;
@@ -100,6 +102,32 @@ test('both account kinds support transitions and reject duplicate retries', asyn
     await f.run({ kind, action: 'setDisabled', disabled: false, expectedDisabled: true });
     assert.equal(f.users.target.disabled, false);
   }
+});
+
+test('dynamic account permission supports distinct Locum and Practice Owner IDs for Disable and Enable', async () => {
+  for (const [kind, ids] of [['locum', ['locum-a', 'locum-b']], ['practice_owner', ['owner-a', 'owner-b']]]) {
+    for (const uid of ids) {
+      const policy = { accountMutationsEnabled: true };
+      const f = fixture({ targetUid: uid, kind, demoPolicy: policy });
+      await f.run({ action: 'status' });
+      await f.run({ action: 'setDisabled', disabled: true, expectedDisabled: false });
+      assert.equal(f.users[uid].disabled, true);
+      await f.run({ action: 'status' });
+      await f.run({ action: 'setDisabled', disabled: false, expectedDisabled: true });
+      assert.equal(f.users[uid].disabled, false);
+      assert.equal(f.mutations.filter(value => value === 'update').length, 2);
+    }
+  }
+});
+
+test('dynamic account gate defaults off and matching role profile is required', async () => {
+  const off = fixture({ targetUid: 'another-locum', demoPolicy: {} });
+  await assert.rejects(off.run({ action: 'setDisabled', disabled: true, expectedDisabled: false }), /disabled/);
+  assert.deepEqual(off.mutations, []);
+  const wrongProfile = fixture({ targetUid: 'owner', kind: 'practice_owner' });
+  wrongProfile.setProfile(false);
+  await assert.rejects(wrongProfile.run({ action: 'status' }), /profile no longer exists/);
+  assert.deepEqual(wrongProfile.mutations, []);
 });
 
 test('unauthorized, stale and malformed login times cannot mutate', async () => {
@@ -135,7 +163,7 @@ test('partial Auth failures report uncertainty without automatic retries or leak
 
 test('nested data blocks deletion; failed profile cleanup is not retried blindly', async () => {
   for (const options of [{ nested: true }, { cleanupFailure: true }]) {
-    const f = fixture(options);
+    const f = fixture({ ...options, kind: 'practice_owner' });
     f.users.target.disabled = true;
     f.users.target.customClaims.accountDisabledAt = Math.floor((f.now - 2 * DELETE_WAIT_MS) / 1000);
     await assert.rejects(f.run({ kind: 'practice_owner', action: 'delete', confirmUid: 'target' }), options.nested ? /nested/ : /cleanup failed/);
