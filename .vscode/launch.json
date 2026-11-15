@@ -1,6 +1,7 @@
 {
   "version": "0.2.0",
   "configurations": [
+    
     {
       "name": "Admin dashboard (local supervised demo)",
       "request": "launch",
@@ -9,6 +10,21 @@
       "program": "lib/main.dart",
       "toolArgs": [
         "--web-port=5174",
+        "--dart-define=FYP_DEMO_MUTATIONS=true",
+        "--dart-define=FYP_DEMO_PROJECT=optolocum-f314e",
+        "--dart-define=FYP_JOB_SOFT_DELETE=true",
+        "--dart-define=ACCOUNT_API_BASE_URL=http://127.0.0.1:8787"
+      ]
+    },
+    {
+      "name": "Admin dashboard (local Firebase emulators)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "chrome",
+      "program": "lib/main.dart",
+      "toolArgs": [
+        "--web-port=5175",
+        "--dart-define=FYP_USE_FIREBASE_EMULATORS=true",
         "--dart-define=FYP_DEMO_MUTATIONS=false",
         "--dart-define=FYP_DEMO_PROJECT=optolocum-f314e",
         "--dart-define=FYP_JOB_SOFT_DELETE=true",

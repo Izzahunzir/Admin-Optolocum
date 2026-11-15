@@ -10,6 +10,7 @@ import 'locums/locum_accounts_page.dart';
 import 'locums/locum_service.dart';
 import 'job_postings/job_postings_page.dart';
 import 'job_postings/job_posting_service.dart';
+import 'verification/verification_management_page.dart';
 
 const _teal = Color(0xFF3D7789);
 const _background = Color(0xFFF5F7F9);
@@ -18,8 +19,15 @@ const _titles = [
   'Practice Owner Account',
   'Locum Account',
   'Job Posting',
+  'Verification',
 ];
-const _icons = [Icons.dashboard, Icons.person, Icons.badge, Icons.work];
+const _icons = [
+  Icons.dashboard,
+  Icons.person,
+  Icons.badge,
+  Icons.work,
+  Icons.verified_user_outlined,
+];
 
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
@@ -274,6 +282,14 @@ class _AdminShellState extends State<AdminShell> {
                               color: Colors.blueGrey,
                             ),
                           )
+                        else if (_selected == 4)
+                          const Text(
+                            'Submitted verification applications · Review status is separate from account activation.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blueGrey,
+                            ),
+                          )
                         else
                           Text(
                             _selected == 0
@@ -301,8 +317,9 @@ class _AdminShellState extends State<AdminShell> {
                           )
                         else if (_selected == 2)
                           LocumAccountsPage(service: _locums, query: _query)
-                        else
+                        else if (_selected == 3)
                           JobPostingsPage(service: _postings, query: _query),
+                        if (_selected == 4) const VerificationManagementPage(),
                       ],
                     ),
                   ),

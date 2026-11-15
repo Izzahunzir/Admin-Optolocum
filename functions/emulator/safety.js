@@ -2,6 +2,7 @@
 const PROJECT = 'demo-optolocum-account-management';
 const AUTH_HOST = '127.0.0.1:19099';
 const FIRESTORE_HOST = '127.0.0.1:18080';
+const STORAGE_HOST = '127.0.0.1:19199';
 function assertEmulatorEnvironment(env = process.env) {
   if (env.GCLOUD_PROJECT !== PROJECT || env.FIREBASE_AUTH_EMULATOR_HOST !== AUTH_HOST || env.FIRESTORE_EMULATOR_HOST !== FIRESTORE_HOST) {
     throw new Error('Exact demo project and loopback Auth/Firestore emulator hosts are required.');
@@ -18,6 +19,15 @@ function assertEmulatorEnvironment(env = process.env) {
   }
   for (const key of ['GOOGLE_APPLICATION_CREDENTIALS', 'FIREBASE_TOKEN', 'GOOGLE_OAUTH_ACCESS_TOKEN', 'FIREBASE_AUTH_EMULATOR_HOST_OVERRIDE']) {
     if (env[key]) throw new Error(`Remove ${key} before emulator testing.`);
+  }
+  if (env.FIREBASE_STORAGE_EMULATOR_HOST && env.FIREBASE_STORAGE_EMULATOR_HOST !== STORAGE_HOST) {
+    throw new Error('Storage emulator must use the exact loopback host and port.');
+  }
+}
+function assertVerificationEmulatorEnvironment(env = process.env) {
+  assertEmulatorEnvironment(env);
+  if (env.FIREBASE_STORAGE_EMULATOR_HOST !== STORAGE_HOST) {
+    throw new Error('Exact loopback Storage emulator host is required for verification testing.');
   }
 }
 function createEmulatorServices() {
@@ -38,4 +48,4 @@ function createEmulatorServices() {
   const db = new Firestore({ projectId: PROJECT, host: FIRESTORE_HOST, ssl: false, authClient });
   return { app, auth, db };
 }
-module.exports = { PROJECT, AUTH_HOST, FIRESTORE_HOST, assertEmulatorEnvironment, createEmulatorServices };
+module.exports = { PROJECT, AUTH_HOST, FIRESTORE_HOST, STORAGE_HOST, assertEmulatorEnvironment, assertVerificationEmulatorEnvironment, createEmulatorServices };
