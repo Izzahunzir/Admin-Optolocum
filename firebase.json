@@ -11,11 +11,24 @@
                                                }
                                   }
                 },
+    "firestore":  {
+                    "indexes":  "firestore.indexes.json"
+                },
     "functions":  [
                       {
                           "runtime":  "nodejs22",
                           "source":  "functions",
                           "codebase":  "account-management"
                       }
-                  ]
+                  ],
+    "emulators": {
+        "auth": { "host": "127.0.0.1", "port": 19099 },
+        "firestore": { "host": "127.0.0.1", "port": 18080 },
+        "functions": { "host": "127.0.0.1", "port": 5001 },
+        "storage": { "host": "127.0.0.1", "port": 19199 },
+        "hub": { "host": "127.0.0.1", "port": 14400 },
+        "logging": { "host": "127.0.0.1", "port": 14500 },
+        "ui": { "enabled": false },
+        "singleProjectMode": true
+    }
 }

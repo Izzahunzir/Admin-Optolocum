@@ -2,10 +2,98 @@
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { getStorage } = require('firebase-admin/storage');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const logger = require('firebase-functions/logger');
 const { manageAccount, ManagementError } = require('./management');
+const verification = require('./verification_management');
+const localEmulatorProject = 'demo-optolocum-account-management';
+const runningInFunctionsEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+
+if (process.env.FUNCTIONS_EMULATOR && !runningInFunctionsEmulator) {
+  throw new Error('Unexpected Functions emulator marker.');
+}
+if (runningInFunctionsEmulator && (
+  process.env.GCLOUD_PROJECT !== localEmulatorProject ||
+  process.env.FIREBASE_AUTH_EMULATOR_HOST !== '127.0.0.1:19099' ||
+  process.env.FIRESTORE_EMULATOR_HOST !== '127.0.0.1:18080' ||
+  process.env.FIREBASE_STORAGE_EMULATOR_HOST !== '127.0.0.1:19199'
+)) {
+  throw new Error('Verification Functions emulator requires the isolated demo project and loopback Auth, Firestore and Storage emulators.');
+}
 initializeApp();
+
+const verificationOptions = { region: 'asia-southeast1', timeoutSeconds: 120 };
+const verificationBucket = getStorage().bucket(runningInFunctionsEmulator
+  ? `${localEmulatorProject}.appspot.com`
+  : 'optolocum-f314e.firebasestorage.app');
+const verificationOrigins = (process.env.VERIFICATION_ADMIN_ORIGINS || '')
+  .split(',').map(origin => origin.trim()).filter(Boolean);
+
+function asHttpsError(error) {
+  if (error instanceof HttpsError) return error;
+  if (error instanceof verification.VerificationManagementError) {
+    const supported = new Set(['unauthenticated', 'permission-denied', 'invalid-argument', 'not-found', 'failed-precondition', 'already-exists', 'aborted']);
+    return new HttpsError(supported.has(error.code) ? error.code : 'internal', error.message);
+  }
+  if (['auth/id-token-revoked', 'auth/id-token-expired', 'auth/invalid-id-token', 'auth/argument-error', 'auth/user-disabled'].includes(error?.code)) {
+    return new HttpsError('unauthenticated', 'Please sign in again.');
+  }
+  if (error?.code === 'auth/user-not-found') return new HttpsError('permission-denied', 'Administrator authorization is no longer valid.');
+  logger.error('Verification operation failed', { code: error?.code || 'unknown' });
+  return new HttpsError('internal', 'The verification operation could not be completed.');
+}
+
+async function verifiedVerificationActor(request) {
+  return verification.verifyBearerAdmin({ auth: getAuth(), request: request.rawRequest });
+}
+
+exports.listPendingVerificationSubmissions = onCall(verificationOptions, async request => {
+  try {
+    const actor = await verifiedVerificationActor(request);
+    const data = request.data;
+    if (data === null || data === undefined || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['accountType', 'pageSize', 'pageToken'].includes(key))) {
+      throw new verification.VerificationManagementError('invalid-argument', 'Invalid list request.');
+    }
+    return await verification.listPendingVerificationSubmissions({
+      auth: getAuth(), db: getFirestore(), actor,
+      accountType: data.accountType, pageSize: data.pageSize ?? verification.DEFAULT_PAGE_SIZE,
+      pageToken: data.pageToken,
+    });
+  } catch (error) { throw asHttpsError(error); }
+});
+
+exports.getVerificationSubmission = onCall(verificationOptions, async request => {
+  try {
+    const actor = await verifiedVerificationActor(request);
+    const data = request.data;
+    if (data === null || data === undefined || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['uid', 'submissionId', 'historyPageSize', 'historyPageToken'].includes(key))) {
+      throw new verification.VerificationManagementError('invalid-argument', 'Invalid submission request.');
+    }
+    return await verification.getVerificationSubmission({ auth: getAuth(), db: getFirestore(), actor, uid: data.uid, submissionId: data.submissionId, historyPageSize: data.historyPageSize ?? verification.DEFAULT_HISTORY_PAGE_SIZE, historyPageToken: data.historyPageToken });
+  } catch (error) { throw asHttpsError(error); }
+});
+
+exports.reviewVerificationSubmission = onCall(verificationOptions, async request => {
+  try {
+    const actor = await verifiedVerificationActor(request);
+    const data = request.data;
+    if (data === null || data === undefined || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['uid', 'submissionId', 'decision', 'rejectionReason'].includes(key))) {
+      throw new verification.VerificationManagementError('invalid-argument', 'Invalid review request.');
+    }
+    return await verification.reviewVerificationSubmission({
+      auth: getAuth(), db: getFirestore(), bucket: verificationBucket, actor,
+      uid: data.uid, submissionId: data.submissionId, decision: data.decision,
+      rejectionReason: data.rejectionReason,
+    });
+  } catch (error) { throw asHttpsError(error); }
+});
+
+exports.getVerificationDocument = onRequest({ ...verificationOptions, memory: '512MiB' },
+  verification.createVerificationDocumentHandler({
+    auth: getAuth(), db: getFirestore(), bucket: verificationBucket,
+    allowedOrigins: verificationOrigins,
+  }));
 
 // One serialized mutation endpoint prevents concurrent enable/delete requests.
 exports.manageAccount = onCall({ region: 'asia-southeast1', concurrency: 1, maxInstances: 1, timeoutSeconds: 120 }, async request => {
