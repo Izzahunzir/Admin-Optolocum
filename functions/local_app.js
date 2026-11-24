@@ -722,6 +722,9 @@ function createLocalApp({
         }
 
         // Do not expose internal error details to the browser.
+
+        console.error("[Local API] Unexpected request error:", error);
+        
         return reject(
           res,
           503,
