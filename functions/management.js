@@ -1,5 +1,6 @@
 ﻿"use strict";
 
+const { validAccess } = require('./access_schema');
 const DELETE_WAIT_MS = 61 * 60 * 1000;
 class ManagementError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -34,7 +35,7 @@ async function manageAccount({ auth, db, actor, data, now = Date.now(), demoPoli
     const op = data.disabled ? 'disable' : 'enable';
     const prepared = await db.runTransaction(async tx => {
       const [a, assignment] = await Promise.all([tx.get(accessRef), tx.get(assignmentRef)]);
-      if (!assignment.exists || assignment.data().trustedAccountType !== kind || !a.exists || !Number.isSafeInteger(a.data().validAfter) || a.data().validAfter < 0 || !['active', 'disabled'].includes(a.data().state)) fail('failed-precondition', 'Account access requires administrator recovery.');
+      if (!assignment.exists || assignment.data().trustedAccountType !== kind || !a.exists || !validAccess(a.data()) || !['active', 'disabled'].includes(a.data().state)) fail('failed-precondition', 'Account access requires administrator recovery.');
       const value = a.data();
       if (value.operation && value.operation !== op) fail('aborted', 'Another account transition needs recovery.');
       if (!value.operation && value.state !== (target.disabled ? 'disabled' : 'active')) {

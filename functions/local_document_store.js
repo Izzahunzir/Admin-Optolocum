@@ -113,4 +113,4 @@ async function createLocalDocumentStore({ root, forbiddenRoots = [] }) {
   }
   return { put, verify, reconcile };
 }
-module.exports = { createLocalDocumentStore, MAX_BYTES };
+module.exports = { createLocalDocumentStore, validateRoot, MAX_BYTES };

@@ -393,7 +393,7 @@ async function verifyBearerAdmin({ auth, request }) {
 function safeFilename(name) {
   return name.replace(/[\r\n"\\]/g, '_').slice(0, 255);
 }
-function createVerificationDocumentHandler({ auth, db, bucket, documentStore, allowedOrigins = [] }) {
+function createVerificationDocumentHandler({ auth, db, bucket, documentStore, allowedOrigins = [], allowOriginless = false }) {
   const originSet = new Set(allowedOrigins.filter(value => typeof value === 'string' && /^https?:\/\/[^/]+$/.test(value)));
   return async function verificationDocumentHandler(request, response) {
     response.set('Cache-Control', 'private, no-store, max-age=0');
@@ -403,9 +403,8 @@ function createVerificationDocumentHandler({ auth, db, bucket, documentStore, al
     response.set('Content-Security-Policy', "default-src 'none'; sandbox");
     const origin = request.get ? request.get('Origin') : request.headers?.origin;
     const allowed = typeof origin === 'string' && originSet.has(origin);
-    if (!allowed || originSet.size === 0) return response.status(403).json({ error: { code: 'permission-denied', message: 'Origin is not allowed.' } });
-    response.set('Access-Control-Allow-Origin', origin);
-    response.set('Vary', 'Origin');
+    if (!allowed && !(allowOriginless && origin === undefined)) return response.status(403).json({ error: { code: 'permission-denied', message: 'Origin is not allowed.' } });
+    if (allowed) { response.set('Access-Control-Allow-Origin', origin); response.set('Vary', 'Origin'); }
     if (request.method === 'OPTIONS') {
       const requestedHeaders = String(request.headers?.['access-control-request-headers'] || '')
         .toLowerCase().split(',').map(value => value.trim()).filter(Boolean);

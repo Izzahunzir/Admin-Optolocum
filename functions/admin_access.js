@@ -1,6 +1,7 @@
 ﻿'use strict';
 // Operator-only, emulator-gated module. Never expose this through HTTP.
 const { assertEmulatorEnvironment } = require('./emulator/safety');
+const { validAccess } = require('./access_schema');
 const fail = message => { throw Object.assign(new Error(message), { code: 'failed-precondition' }); };
 async function controlAdminAccess({ auth, db, uid, action }) {
   assertEmulatorEnvironment();
@@ -13,7 +14,7 @@ async function controlAdminAccess({ auth, db, uid, action }) {
   await db.runTransaction(async tx => {
     const snap = await tx.get(access);
     const existing = snap.exists ? snap.data() : null;
-    if (existing && (!['active', 'disabled'].includes(existing.state) || !Number.isSafeInteger(existing.validAfter) || existing.validAfter < 0)) fail('Malformed access record requires operator review.');
+    if (existing && (!validAccess(existing) || !['active', 'disabled'].includes(existing.state))) fail('Malformed access record requires operator review.');
     if (existing?.operation && existing.operation !== operation) fail('Another transition requires operator review.');
     tx.set(access, { state: 'disabled', validAfter: Math.max(existing?.validAfter || 0, Math.floor(Date.now() / 1000)), operation });
   });
