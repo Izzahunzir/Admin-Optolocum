@@ -60,6 +60,7 @@ async function finalizeVerification({ db, bucket, documentStore, uid, submission
     if (!current.exists) reject('Revision does not exist.');
     if (!currentAssignment.exists || currentAssignment.data().trustedAccountType !== draft.accountType) reject('Trusted account assignment changed.');
     if (current.data().state === 'submitted') return;
+    if (['approved', 'verified'].includes(existingProfile.data()?.verificationStatus)) reject('Approved verification cannot be changed.');
     const checked = validateDraft(current.data(), uid, submissionId);
     if (checked.fingerprint !== draft.fingerprint || ['path', 'name', 'contentType', 'size', 'sha256'].some(key => checked.document[key] !== draft.document[key]) || checked.createdAt.toMillis() !== draft.createdAt.toMillis()) reject('Revision changed during validation.');
     if (otherProfile.exists || (draft.accountType === 'practice_owner' && !existingProfile.exists)) reject('Account profiles require review.');

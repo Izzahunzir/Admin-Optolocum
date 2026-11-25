@@ -41,6 +41,15 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
     const response = await fetch('http://127.0.0.1:19099/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=synthetic', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password, returnSecureToken: true }) });
     assert.equal(response.status, 200); return (await response.json()).idToken;
   }
+  async function tokenAfterCutoff(uid, email) {
+    const access = (await db.collection('account_access').doc(uid).get()).data();
+    const delay = Math.max(0, (access.validAfter + 2) * 1000 - Date.now());
+    await new Promise(resolve => setTimeout(resolve, delay));
+    const token = await tokenFor(email);
+    const decoded = await auth.verifyIdToken(token, true);
+    assert.ok(decoded.auth_time > access.validAfter, 'Synthetic sign-in must be newer than the access cutoff');
+    return token;
+  }
   async function call(route, token, body, contentType = 'application/json') {
     const response = await fetch(`http://${HOST}:${PORT}${route}`, { method: 'POST', headers: { origin: ORIGIN, 'content-type': contentType, ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: contentType === 'application/json' ? JSON.stringify(body) : body });
     return { status: response.status, body: await response.json() };
@@ -48,8 +57,7 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
   const admin = await user(true), unassigned = await user();
   assert.equal((await call('/api/verification/queue', admin.token, {})).status, 403);
   await controlAdminAccess({ auth, db, uid: admin.uid, action: 'bootstrap' });
-  await new Promise(resolve => setTimeout(resolve, 1100));
-  admin.token = await tokenFor((await auth.getUser(admin.uid)).email);
+  admin.token = await tokenAfterCutoff(admin.uid, (await auth.getUser(admin.uid)).email);
   const actor = { uid: admin.uid, admin: true, auth_time: Math.floor(Date.now() / 1000) };
   await assignAccountType({ auth, db, actor, uid: unassigned.uid, accountType: 'locum', evidenceReference: 'synthetic-recovery' });
   const existing = await user();
@@ -69,12 +77,10 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
   const otherType = { ...conflict, accountType: 'practice_owner', profile: { fullName: 'Synthetic Owner', phoneNumber: '0123456789', role: 'Manager' } };
   const conflictResults = await Promise.all([call('/api/enrollment', null, conflict), call('/api/enrollment', null, otherType)]);
   assert.deepEqual(conflictResults.map(r => r.status).sort(), [200, 403]);
-  await new Promise(resolve => setTimeout(resolve, 1100));
-  const l = { uid: attempts[0].body.data.uid, token: await tokenFor(locumEnrollment.email) };
+  const l = { uid: attempts[0].body.data.uid, token: await tokenAfterCutoff(attempts[0].body.data.uid, locumEnrollment.email) };
   const ownerEnrollment = enrollment('practice_owner', `owner-${randomUUID()}@example.invalid`);
   const ownerResult = await call('/api/enrollment', null, ownerEnrollment); assert.equal(ownerResult.status, 200);
-  await new Promise(resolve => setTimeout(resolve, 1100));
-  const p = { uid: ownerResult.body.data.uid, token: await tokenFor(ownerEnrollment.email) };
+  const p = { uid: ownerResult.body.data.uid, token: await tokenAfterCutoff(ownerResult.body.data.uid, ownerEnrollment.email) };
   for (const u of [l, p]) {
     assert.equal((await auth.getUser(u.uid)).customClaims?.admin, undefined);
     const profileName = u === l ? 'locum_profiles' : 'practice_owner_profiles';
@@ -101,7 +107,7 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
   const results = [];
   for (const [u, accountType] of [[l, 'locum'], [p, 'practice_owner']]) {
     const requestId = rid(), payload = { requestId, accountType, submittedFields: fields[accountType] };
-    const created = await call('/api/applicant/draft', u.token, payload); assert.equal(created.status, 200);
+    const created = await call('/api/applicant/draft', u.token, payload); assert.equal(created.status, 200, `${accountType}: ${JSON.stringify(created.body)}`);
     assert.deepEqual((await call('/api/applicant/draft', u.token, payload)).body, created.body);
     if (accountType === 'locum') {
       await new Promise(resolve => {

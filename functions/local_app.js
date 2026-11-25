@@ -5,6 +5,7 @@ const express = require("express");
 const { manageJob } = require("./job_management");
 const { manageAccount, ManagementError } = require("./management");
 const verification = require("./verification_management");
+const { activeAccess } = require('./access_schema');
 
 const HOST = "127.0.0.1";
 const PORT = 8787;
@@ -97,6 +98,8 @@ function createLocalApp({
   bucket = null,
   documentStore = null,
   applicantEmulatorOnly = false,
+  realPreparationOnly = false,
+  transport = null,
   manager = manageAccount,
   verificationManager = verification,
   demoPolicy = null,
@@ -107,7 +110,7 @@ function createLocalApp({
   async function assertAdminAccess(actor) {
     const snapshot = await db.collection('account_access').doc(actor.uid).get();
     const value = snapshot.data();
-    if (!snapshot.exists || value.state !== 'active' || value.operation != null || !Number.isSafeInteger(value.validAfter) || value.validAfter < 0 || !Number.isSafeInteger(actor.auth_time) || actor.auth_time <= value.validAfter) {
+    if (!snapshot.exists || !activeAccess(value) || !Number.isSafeInteger(actor.auth_time) || actor.auth_time <= value.validAfter) {
       throw new verification.VerificationManagementError('permission-denied', 'Administrator access is unavailable.');
     }
   }
@@ -131,7 +134,8 @@ function createLocalApp({
         db,
         bucket,
         documentStore,
-        allowedOrigins: [ORIGIN],
+        allowedOrigins: transport?.origins || [ORIGIN],
+        allowOriginless: realPreparationOnly && transport?.allowNative === true,
       })
     : null;
 
@@ -154,9 +158,14 @@ function createLocalApp({
           req.rawHeaders[index].toLowerCase() === key
       ).length;
 
+    if (realPreparationOnly && !req.socket.encrypted) {
+      return reject(res, 403, 'permission-denied', 'HTTPS is required.');
+    }
+    const allowedHosts = transport?.hosts || [`${HOST}:${PORT}`];
+    const allowedOrigins = transport?.origins || [ORIGIN];
     if (
       headerCount("host") !== 1 ||
-      req.headers.host !== `${HOST}:${PORT}`
+      !allowedHosts.includes(req.headers.host)
     ) {
       return reject(
         res,
@@ -179,7 +188,7 @@ function createLocalApp({
 
     if (
       headerCount("origin") > 1 ||
-      (origin !== undefined && origin !== ORIGIN)
+      (origin !== undefined && !allowedOrigins.includes(origin))
     ) {
       return reject(
         res,
@@ -189,8 +198,8 @@ function createLocalApp({
       );
     }
 
-    if (origin === ORIGIN) {
-      res.set("Access-Control-Allow-Origin", ORIGIN);
+    if (origin !== undefined && allowedOrigins.includes(origin)) {
+      res.set("Access-Control-Allow-Origin", origin);
       res.vary("Origin");
     }
 
@@ -200,7 +209,7 @@ function createLocalApp({
       return next();
     }
 
-    if (origin !== ORIGIN) {
+    if (origin === undefined && !(realPreparationOnly && transport?.allowNative === true)) {
       return reject(
         res,
         403,
@@ -284,13 +293,24 @@ function createLocalApp({
   app.get("/health", (req, res) => {
   return res.status(200).json({
     status: "ok",
-    mode: "local",
+    mode: realPreparationOnly ? "real-firebase-preparation" : "local",
     accountMutationsEnabled:
       demoPolicy?.accountMutationsEnabled === true,
     jobSoftDeleteEnabled:
       demoPolicy?.jobSoftDeleteEnabled === true,
   });
 });
+
+  // This mode has no activation switch: mutation routes require a future,
+  // separately reviewed implementation before they can reach business logic.
+  if (realPreparationOnly) {
+    app.use((req, res, next) => {
+      if ([API_PATH, JOB_PATH, VERIFICATION_REVIEW_PATH].includes(req.path)) {
+        return reject(res, 503, 'unavailable', 'Mutations are not activated.');
+      }
+      next();
+    });
+  }
 
   if (applicantEmulatorOnly) {
     const { assertEmulatorEnvironment } = require('./emulator/safety');
@@ -308,6 +328,39 @@ function createLocalApp({
   }
 
   // ---------------------------------------------------------------------------
+  app.post('/api/session/validate', express.json({ limit: '1kb', strict: true }), async (req, res) => {
+    if (Object.keys(req.query).length || !req.is('application/json') || !isPlainObject(req.body) ||
+        Object.keys(req.body).length !== 1 || !['locum', 'practice_owner'].includes(req.body.accountType))
+      return reject(res, 400, 'invalid-argument', 'Invalid session request.');
+    const token = getBearerToken(req);
+    if (!token) return reject(res, 401, 'unauthenticated', 'Authentication failed.');
+    let actor;
+    try { actor = await auth.verifyIdToken(token, true); }
+    catch (error) {
+      if (['auth/argument-error', 'auth/invalid-id-token', 'auth/id-token-expired', 'auth/id-token-revoked', 'auth/invalid-user-token', 'auth/user-disabled'].includes(error.code))
+        return reject(res, 401, 'unauthenticated', 'Authentication failed.');
+      return reject(res, 503, 'unavailable', 'Session validation is unavailable.');
+    }
+    if (!isValidUid(actor?.uid) || actor.admin === true)
+      return reject(res, 403, 'permission-denied', 'Account access is unavailable.');
+    try {
+      const user = await auth.getUser(actor.uid);
+      const [assignment, access] = await Promise.all([
+        db.collection('account_management').doc(actor.uid).get(),
+        db.collection('account_access').doc(actor.uid).get(),
+      ]);
+      if (user.disabled !== false || user.customClaims?.admin === true || !assignment.exists ||
+          assignment.data()?.trustedAccountType !== req.body.accountType || !access.exists ||
+          !activeAccess(access.data()) || !Number.isSafeInteger(actor.auth_time) || actor.auth_time <= access.data().validAfter)
+        return reject(res, 403, 'permission-denied', 'Account access is unavailable.');
+      return res.json({ data: { uid: actor.uid, accountType: req.body.accountType, access: 'active' } });
+    } catch (error) {
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/user-disabled')
+        return reject(res, 403, 'permission-denied', 'Account access is unavailable.');
+      return reject(res, 503, 'unavailable', 'Session validation is unavailable.');
+    }
+  });
+
   // Account management, job soft-delete and verification POST endpoints
   // ---------------------------------------------------------------------------
 
@@ -394,7 +447,7 @@ function createLocalApp({
             "Administrator access is required."
           );
         }
-        if (applicantEmulatorOnly) await assertAdminAccess(actor);
+        if (applicantEmulatorOnly || realPreparationOnly) await assertAdminAccess(actor);
 
         // ---------------------------------------------------------------------
         // Verification queue
@@ -751,7 +804,8 @@ function createLocalApp({
 
         // Do not expose internal error details to the browser.
 
-        console.error("[Local API] Unexpected request error:", error);
+        if (realPreparationOnly) console.error("[Local API] Request failed.");
+        else console.error("[Local API] Unexpected request error:", error);
         
         return reject(
           res,
@@ -779,7 +833,7 @@ function createLocalApp({
       );
     }
 
-    if (applicantEmulatorOnly) {
+    if (applicantEmulatorOnly || realPreparationOnly) {
       try {
         const actor = await verificationManager.verifyBearerAdmin({ auth, request: req });
         await verificationManager.assertCurrentAdmin({ auth, actor });

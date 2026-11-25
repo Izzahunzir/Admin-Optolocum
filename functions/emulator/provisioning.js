@@ -22,7 +22,6 @@ async function provisionAccount({ auth, db, actor, data, now = Date.now() }) {
   if (target.disabled || target.customClaims?.admin === true || target.customClaims?.accountDisabledAt !== undefined) fail('failed-precondition', 'Disabled or administrator accounts require separate recovery.');
   const cutoff = Date.parse(target.tokensValidAfterTime);
   if (!Number.isFinite(cutoff) || cutoff < 0) fail('failed-precondition', 'Invalid Authentication cutoff.');
-  const { Timestamp } = require('firebase-admin/firestore');
   return db.runTransaction(async tx => {
     assertEmulatorEnvironment();
     const ref = db.collection('account_access').doc(data.uid);
@@ -36,7 +35,7 @@ async function provisionAccount({ auth, db, actor, data, now = Date.now() }) {
     const latest = await auth.getUser(data.uid);
     if (latest.disabled || latest.customClaims?.admin === true || latest.customClaims?.accountDisabledAt !== undefined || latest.tokensValidAfterTime !== target.tokensValidAfterTime) fail('aborted', 'Authentication state changed.');
     const validAfter = Math.max(seconds, Math.ceil(cutoff / 1000));
-    tx.create(ref, { state: 'active', validAfter, updatedAt: Timestamp.fromMillis(now), updatedBy: actor.uid, schemaVersion: 1 });
+    tx.create(ref, { state: 'active', validAfter, operation: null });
     return { uid: data.uid, state: 'active', validAfter, requiresNewLogin: true };
   });
 }

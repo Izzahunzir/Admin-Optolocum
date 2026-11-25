@@ -10,6 +10,7 @@
     "inventory:production:read-only": "node inventory.js",
     "migration:dry-run": "node migration.js",
     "start:local": "node local_server.js",
+    "start:real:prepare": "node real_server.js",
     "emulators:start": "node emulator/launch.js start",
     "emulators:verification": "node emulator/launch.js verification",
     "emulators:local-api": "node emulator/local_api.js",

@@ -1,4 +1,5 @@
 ﻿'use strict';
+const { activeAccess } = require('./access_schema');
 const express = require('express');
 const { randomBytes, createHash } = require('node:crypto');
 const { Timestamp, FieldValue, FieldPath } = require('firebase-admin/firestore');
@@ -31,7 +32,7 @@ function createApplicantRouter({ auth, db, documentStore }) {
         if (user.disabled || user.customClaims?.admin === true) fail('permission-denied', 'Account is unavailable.');
         const access = await db.collection('account_access').doc(token.uid).get();
         const value = access.data();
-        if (!access.exists || value.state !== 'active' || value.operation != null || !Number.isSafeInteger(value.validAfter) || value.validAfter < 0 || !Number.isSafeInteger(token.auth_time) || token.auth_time <= value.validAfter) fail('permission-denied', 'Account access is unavailable. Please sign in again or contact support.');
+        if (!access.exists || !activeAccess(value) || !Number.isSafeInteger(token.auth_time) || token.auth_time <= value.validAfter) fail('permission-denied', 'Account access is unavailable. Please sign in again or contact support.');
       };
       await req.assertApplicantActive(); next();
     } catch (error) { next(error); }
@@ -44,8 +45,9 @@ function createApplicantRouter({ auth, db, documentStore }) {
       validateFields(uid, id, accountType, submittedFields);
       const assignment = db.collection('account_management').doc(uid);
       const ref = db.collection('verification_upload_drafts').doc(uid).collection('requests').doc(requestId);
+      const profile = db.collection(accountType === 'locum' ? 'locum_profiles' : 'practice_owner_profiles').doc(uid);
       const result = await db.runTransaction(async tx => {
-        const [a, existing] = await Promise.all([tx.get(assignment), tx.get(ref)]);
+        const [a, existing, profileSnapshot] = await Promise.all([tx.get(assignment), tx.get(ref), tx.get(profile)]);
         if (!a.exists || a.data().trustedAccountType !== accountType) fail('failed-precondition', 'Trusted account assignment is missing or does not match.');
         if (existing.exists) {
           const d = existing.data();
@@ -54,6 +56,7 @@ function createApplicantRouter({ auth, db, documentStore }) {
           return { submissionId: d.submissionId, state: revision.exists && revision.data().state === 'submitted' ? 'submitted' : 'draft' };
         }
         await req.assertApplicantActive();
+        if (['approved', 'verified'].includes(profileSnapshot.data()?.verificationStatus)) fail('failed-precondition', 'Approved verification cannot be changed.');
         tx.create(ref, { uid, accountType, submittedFields, submissionId: id, state: 'draft', createdAt: Timestamp.now(), updatedAt: FieldValue.serverTimestamp() });
         return { submissionId: id, state: 'draft' };
       });
@@ -78,8 +81,10 @@ function createApplicantRouter({ auth, db, documentStore }) {
       if (!assigned.exists || assigned.data().trustedAccountType !== staged.accountType) fail('failed-precondition', 'Trusted account assignment is missing or does not match.');
       const doc = await documentStore.put({ uid, submissionId: staged.submissionId, name: `document.${ext}`, contentType, stream: req });
       const revision = db.collection('verification_submissions').doc(uid).collection('revisions').doc(staged.submissionId);
+      const profile = db.collection(staged.accountType === 'locum' ? 'locum_profiles' : 'practice_owner_profiles').doc(uid);
       await db.runTransaction(async tx => {
-        const [current, a, existing] = await Promise.all([tx.get(ref), tx.get(assignment), tx.get(revision)]);
+        const [current, a, existing, profileSnapshot] = await Promise.all([tx.get(ref), tx.get(assignment), tx.get(revision), tx.get(profile)]);
+        if (['approved', 'verified'].includes(profileSnapshot.data()?.verificationStatus)) fail('failed-precondition', 'Approved verification cannot be changed.');
         if (!current.exists || current.data().state !== 'draft' || current.data().submissionId !== staged.submissionId || !a.exists || a.data().trustedAccountType !== staged.accountType) fail('failed-precondition', 'Draft or account assignment changed.');
         if (existing.exists) {
           const d = existing.data();
