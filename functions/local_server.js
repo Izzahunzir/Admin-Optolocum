@@ -2,21 +2,23 @@
 const { initializeApp, applicationDefault } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getFirestore } = require('firebase-admin/firestore');
-const { getStorage } = require('firebase-admin/storage');
+const { createLocalDocumentStore } = require('./local_document_store');
 const { createLocalApp, HOST, PORT } = require('./local_app');
 const { loadDemoConfig, assertLocalServerEnvironment } = require('./demo_config');
 
 // Never let emulator configuration weaken token verification for this live project.
+async function main() {
 try {
   assertLocalServerEnvironment(); // Offline preflight; never probe metadata for missing local ADC.
   const demoPolicy = loadDemoConfig(); // Missing file = OFF. Invalid file fails before SDK initialization.
   initializeApp({ credential: applicationDefault(), projectId: 'optolocum-f314e' });
-  const bucket = getStorage().bucket('optolocum-f314e.firebasestorage.app');
+  const documentStore = process.env.OPT_DOCUMENT_STORE_ROOT
+    ? await createLocalDocumentStore({ root: process.env.OPT_DOCUMENT_STORE_ROOT }) : null;
 
   const app = createLocalApp({
   auth: getAuth(),
   db: getFirestore(),
-  bucket,
+  documentStore,
   demoPolicy,
   });
   const enabled = demoPolicy.accountMutationsEnabled || demoPolicy.jobSoftDeleteEnabled;
@@ -36,3 +38,5 @@ try {
     ? error.message : 'Local server could not start. Check local credentials and configuration.');
   process.exitCode = 1;
 }
+}
+main();

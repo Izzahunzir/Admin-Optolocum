@@ -95,12 +95,22 @@ function createLocalApp({
   auth,
   db,
   bucket = null,
+  documentStore = null,
+  applicantEmulatorOnly = false,
   manager = manageAccount,
   verificationManager = verification,
   demoPolicy = null,
 }) {
   const app = express();
   const serialized = createSerialExecutor();
+
+  async function assertAdminAccess(actor) {
+    const snapshot = await db.collection('account_access').doc(actor.uid).get();
+    const value = snapshot.data();
+    if (!snapshot.exists || value.state !== 'active' || value.operation != null || !Number.isSafeInteger(value.validAfter) || value.validAfter < 0 || !Number.isSafeInteger(actor.auth_time) || actor.auth_time <= value.validAfter) {
+      throw new verification.VerificationManagementError('permission-denied', 'Administrator access is unavailable.');
+    }
+  }
 
   app.disable("x-powered-by");
   app.set("trust proxy", false);
@@ -115,11 +125,12 @@ function createLocalApp({
   };
 
   // Create the private document handler once.
-  const documentHandler = bucket
+  const documentHandler = (documentStore || bucket)
     ? verificationManager.createVerificationDocumentHandler({
         auth,
         db,
         bucket,
+        documentStore,
         allowedOrigins: [ORIGIN],
       })
     : null;
@@ -220,7 +231,7 @@ function createLocalApp({
       ];
 
       const validPostPreflight =
-        postPaths.includes(req.path) &&
+        (postPaths.includes(req.path) || (applicantEmulatorOnly && (req.path === '/api/enrollment' || /^\/api\/applicant\/(?:draft|finalize|upload\/[a-f0-9]{32})$/.test(req.path)))) &&
         requestedMethod === "POST";
 
       const validDocumentPreflight =
@@ -280,6 +291,21 @@ function createLocalApp({
       demoPolicy?.jobSoftDeleteEnabled === true,
   });
 });
+
+  if (applicantEmulatorOnly) {
+    const { assertEmulatorEnvironment } = require('./emulator/safety');
+    const { createApplicantRouter } = require('./applicant_submission');
+    const { createEnrollmentRouter } = require('./account_enrollment');
+    assertEmulatorEnvironment();
+    app.use('/api/applicant', (req, res, next) => {
+      try { assertEmulatorEnvironment(); next(); }
+      catch (_) { res.status(503).json({ error: { code: 'unavailable', message: 'Applicant submissions are unavailable.' } }); }
+    }, createApplicantRouter({ auth, db, documentStore }));
+    app.use('/api/enrollment', (req, res, next) => {
+      try { assertEmulatorEnvironment(); next(); }
+      catch (_) { res.status(503).json({ error: { code: 'unavailable', message: 'Enrollment is unavailable.' } }); }
+    }, createEnrollmentRouter({ auth, db }));
+  }
 
   // ---------------------------------------------------------------------------
   // Account management, job soft-delete and verification POST endpoints
@@ -368,6 +394,7 @@ function createLocalApp({
             "Administrator access is required."
           );
         }
+        if (applicantEmulatorOnly) await assertAdminAccess(actor);
 
         // ---------------------------------------------------------------------
         // Verification queue
@@ -465,7 +492,7 @@ function createLocalApp({
 
           if (
             data.decision === "approved" &&
-            !bucket
+            !bucket && !documentStore
           ) {
             return reject(
               res,
@@ -480,6 +507,7 @@ function createLocalApp({
               auth,
               db,
               bucket,
+              documentStore,
               actor,
               ...data,
             })
@@ -739,7 +767,7 @@ function createLocalApp({
   // Private verification document endpoint
   // ---------------------------------------------------------------------------
 
-  app.get(VERIFICATION_DOCUMENT_PATH, (req, res) => {
+  app.get(VERIFICATION_DOCUMENT_PATH, async (req, res) => {
     if (!documentHandler) {
       res.set("Cache-Control", "private, no-store");
 
@@ -751,6 +779,13 @@ function createLocalApp({
       );
     }
 
+    if (applicantEmulatorOnly) {
+      try {
+        const actor = await verificationManager.verifyBearerAdmin({ auth, request: req });
+        await verificationManager.assertCurrentAdmin({ auth, actor });
+        await assertAdminAccess(actor);
+      } catch (_) { return reject(res, 403, 'permission-denied', 'Administrator access is unavailable.'); }
+    }
     return documentHandler(req, res);
   });
 

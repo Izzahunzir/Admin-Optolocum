@@ -15,6 +15,7 @@
     "emulators:local-api": "node emulator/local_api.js",
     "emulators:seed-verification": "node emulator/seed_verification.js",
     "test:emulator": "node emulator/launch.js test",
+    "test:applicant": "node emulator/launch.js applicant",
     "start:emulator": "node emulator/server.js",
     "test:rules": "node emulator/launch.js rules"
   },

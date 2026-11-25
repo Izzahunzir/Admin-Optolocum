@@ -185,7 +185,7 @@ test('list rejects non-admins, disabled admins, invalid account types, and unbou
 test('bounded pagination returns a cursor and retrieves the next page', async () => {
   const f = fixture();
   const secondId = 'd'.repeat(40);
-  f.db.docs.set(`verification_submissions/locum-user/revisions/${secondId}`, submission('locum-user', secondId, 'locum', 'pending', 'submitted', new Date(Date.now() - 1000)));
+  f.db.docs.set(`verification_submissions/second-user/revisions/${secondId}`, submission('second-user', secondId, 'locum', 'pending', 'submitted', new Date(Date.now() - 1000)));
   const first = await listPendingVerificationSubmissions({ ...f, accountType: 'locum', pageSize: 1 });
   assert.equal(first.items.length, 1);
   assert.ok(first.nextPageToken);
@@ -197,9 +197,9 @@ test('bounded pagination returns a cursor and retrieves the next page', async ()
 test('queue advances over unrelated matching revision documents at a page boundary', async () => {
   const f = fixture();
   const newer = submission('locum-user', 'd'.repeat(40), 'locum', 'pending', 'submitted', new Date(Date.now() + 10000));
-  const older = submission('locum-user', 'e'.repeat(40), 'locum', 'pending', 'submitted', new Date(Date.now() - 10000));
+  const older = submission('second-user', 'e'.repeat(40), 'locum', 'pending', 'submitted', new Date(Date.now() - 10000));
   f.db.docs.set('verification_submissions/locum-user/revisions/' + 'd'.repeat(40), newer);
-  f.db.docs.set('verification_submissions/locum-user/revisions/' + 'e'.repeat(40), older);
+  f.db.docs.set('verification_submissions/second-user/revisions/' + 'e'.repeat(40), older);
   f.db.docs.set('verification_reviews/other-user/revisions/' + 'f'.repeat(40), {
     uid: 'other-user', accountType: 'locum', state: 'submitted', verificationStatus: 'pending', submittedAt: new Date(Date.now() + 20000),
   });
@@ -210,6 +210,16 @@ test('queue advances over unrelated matching revision documents at a page bounda
   const second = await listPendingVerificationSubmissions({ ...f, accountType: 'locum', pageSize: 1, pageToken: first.nextPageToken });
   assert.equal(second.items.length, 1);
   assert.notEqual(second.items[0].submissionId, first.items[0].submissionId);
+});
+
+test('queue hides historical reviewed and superseded pending revisions without rewriting them', async () => {
+  const f = fixture();
+  const old = submission('locum-user', olderId, 'locum', 'pending', 'submitted', new Date(Date.now() - 10000));
+  f.db.docs.set(`verification_submissions/locum-user/revisions/${olderId}`, old);
+  f.db.docs.set(`verification_reviews/locum-user/revisions/${id}`, { decision: 'approved' });
+  const page = await listPendingVerificationSubmissions({ ...f });
+  assert.equal(page.items.length, 0);
+  assert.deepEqual(f.db.docs.get(`verification_submissions/locum-user/revisions/${olderId}`), old);
 });
 
 test('details include exact submission, prior revisions, and separate review history', async () => {
@@ -250,7 +260,7 @@ test('history safely signals malformed revisions omitted from a page', async () 
   assert.equal(result.historyOmittedCount, 1);
 });
 
-test('approval writes review and matching profile only; target Auth state and revision remain unchanged', async () => {
+test('approval updates review, revision and matching profile while preserving Auth state', async () => {
   const f = fixture({ targetDisabled: true });
   const before = f.db.docs.get(`verification_submissions/locum-user/revisions/${id}`);
   const previous = submission('locum-user', olderId, 'locum', 'pending', 'submitted', new Date(Date.now() - 5000));
@@ -258,8 +268,9 @@ test('approval writes review and matching profile only; target Auth state and re
   const result = await reviewVerificationSubmission({ ...f, uid: 'locum-user', submissionId: id, decision: 'approved' });
   assert.equal(result.profileCollection, 'locum_profiles');
   assert.equal(f.db.docs.get('locum_profiles/locum-user').verificationStatus, 'approved');
+  assert.equal(f.db.docs.get(`verification_submissions/locum-user/revisions/${id}`).verificationStatus, 'approved');
   assert.equal(f.users.get('locum-user').disabled, true);
-  assert.deepEqual(f.db.docs.get(`verification_submissions/locum-user/revisions/${id}`), before);
+  assert.deepEqual(f.db.docs.get(`verification_submissions/locum-user/revisions/${id}`).submittedFields, before.submittedFields);
   assert.deepEqual(f.db.docs.get(`verification_submissions/locum-user/revisions/${olderId}`), previous);
   assert.equal(f.db.docs.get(`verification_reviews/locum-user/revisions/${id}`).decision, 'approved');
   assert.equal(f.db.docs.get(`verification_reviews/locum-user/revisions/${id}`).reviewedBy, 'admin');
@@ -317,6 +328,7 @@ test('rejection requires nonblank reason, updates only Practice Owner verificati
   const result = await reviewVerificationSubmission({ ...f, uid: 'owner-user', submissionId: olderId, decision: 'rejected', rejectionReason: '  SSM document is not current  ' });
   assert.equal(result.profileCollection, 'practice_owner_profiles');
   assert.equal(f.db.docs.get('practice_owner_profiles/owner-user').verificationStatus, 'rejected');
+  assert.equal(f.db.docs.get(`verification_submissions/owner-user/revisions/${olderId}`).verificationStatus, 'rejected');
   assert.equal(f.users.get('owner-user').disabled, false);
   assert.equal(f.db.docs.get(`verification_reviews/owner-user/revisions/${olderId}`).rejectionReason, 'SSM document is not current');
   await assert.rejects(reviewVerificationSubmission({ ...f, uid: 'owner-user', submissionId: id, decision: 'rejected' }), isCode('invalid-argument'));
@@ -340,7 +352,7 @@ test('drafts and previously reviewed submissions cannot be reviewed twice', asyn
   f.db.docs.set(`verification_submissions/locum-user/revisions/${draftId}`, submission('locum-user', draftId, 'locum', 'pending', 'draft'));
   await assert.rejects(reviewVerificationSubmission({ ...f, uid: 'locum-user', submissionId: draftId, decision: 'rejected', rejectionReason: 'reason' }), isCode('failed-precondition'));
   await reviewVerificationSubmission({ ...f, uid: 'locum-user', submissionId: id, decision: 'rejected', rejectionReason: 'reason' });
-  await assert.rejects(reviewVerificationSubmission({ ...f, uid: 'locum-user', submissionId: id, decision: 'approved' }), isCode('already-exists'));
+  await assert.rejects(reviewVerificationSubmission({ ...f, uid: 'locum-user', submissionId: id, decision: 'approved' }), isCode('failed-precondition'));
 });
 
 test('concurrent reviews produce one decision with no conflicting profile update', async () => {
@@ -451,4 +463,13 @@ test('bearer authentication checks revocation and rejects duplicate authorizatio
   assert.equal(actor.uid, 'admin');
   await assert.rejects(verifyBearerAdmin({ auth: f.auth, request: { headers: { authorization: 'Bearer valid' }, rawHeaders: ['Authorization', 'Bearer a', 'authorization', 'Bearer b'] } }), isCode('invalid-argument'));
   await assert.rejects(verifyBearerAdmin({ auth: f.auth, request: { headers: { authorization: 'Bearer invalid' }, rawHeaders: ['Authorization', 'Bearer invalid'] } }), isCode('unauthenticated'));
+});
+
+test('approval validates through an injected document store', async () => {
+  const f = fixture();
+  const seen = [];
+  const documentStore = { verify: async document => { seen.push(document.path); return { createReadStream: () => Readable.from([bytes]) }; } };
+  await reviewVerificationSubmission({ ...f, bucket: null, documentStore, uid: 'locum-user', submissionId: id, decision: 'approved' });
+  assert.deepEqual(seen, [`verification_documents/locum-user/${id}/document`]);
+  assert.equal(f.db.docs.get('locum_profiles/locum-user').verificationStatus, 'approved');
 });

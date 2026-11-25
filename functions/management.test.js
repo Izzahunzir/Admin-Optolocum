@@ -14,6 +14,7 @@ function fixture(options = {}) {
   const mutations = [];
   let dependencies = false;
   let profileExists = true;
+  const access = { state: 'active', validAfter: 0, operation: null };
   const auth = {
     getUser: async uid => { if (!users[uid]) throw Object.assign(new Error('missing'), { code: 'auth/user-not-found' }); return structuredClone(users[uid]); },
     setCustomUserClaims: async (uid, claims) => { users[uid].customClaims = claims; mutations.push('claims'); },
@@ -27,10 +28,22 @@ function fixture(options = {}) {
       where: () => ({ limit: () => ({ get: async () => ({ empty: !dependencies }) }) }),
     }),
     batch: () => ({ delete: ref => mutations.push(ref.path), commit: async () => { if (options.cleanupFailure) throw new Error('private'); } }),
+    runTransaction: async fn => fn({
+      get: async ref => ({ exists: true, data: () => ref.path.startsWith('account_access/') ? { ...access } : { trustedAccountType: kind } }),
+      update: (ref, value) => Object.assign(access, value),
+    }),
   };
   const run = data => manageAccount({ auth, db, actor: { uid: 'admin', admin: true, auth_time: now / 1000, ...options.actor }, data: { uid: targetUid, kind, ...data }, now, demoPolicy: options.demoPolicy });
-  return { auth, users, mutations, run, now, targetUid, kind, setDependencies: value => { dependencies = value; }, setProfile: value => { profileExists = value; } };
+  return { auth, users, mutations, access, run, now, targetUid, kind, setDependencies: value => { dependencies = value; }, setProfile: value => { profileExists = value; } };
 }
+
+test('inconsistent Auth and access state is blocked for recovery', async () => {
+  const f = fixture();
+  f.users.target.disabled = true;
+  await assert.rejects(f.run({ action: 'setDisabled', disabled: false, expectedDisabled: true }), /inconsistent/);
+  assert.equal(f.access.state, 'disabled');
+  assert.deepEqual(f.mutations, []);
+});
 
 test('disable and enable use Authentication, preserve claims, and revoke sessions', async () => {
   const f = fixture();

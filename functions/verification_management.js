@@ -20,6 +20,10 @@ const PROFILE_COLLECTIONS = Object.freeze({
   locum: 'locum_profiles',
   practice_owner: 'practice_owner_profiles',
 });
+const VERIFIED_PROFILE_FIELDS = Object.freeze({
+  locum: ['fullName', 'nric', 'dateOfBirth', 'highestEducation', 'course'],
+  practice_owner: ['practiceType', 'clinicName', 'registrationNumber', 'address', 'state'],
+});
 const SAFE_PROFILE_STATUSES = new Set(['unverified', 'pending', 'approved', 'rejected', 'verified']);
 
 class VerificationManagementError extends Error {
@@ -178,7 +182,17 @@ async function listPendingVerificationSubmissions({ auth, db, actor, accountType
       scannedCount++;
       const item = publicSubmission(doc);
       if (item && doc.data().state === 'submitted' && doc.data().verificationStatus === 'pending' &&
-          (!accountType || item.accountType === accountType)) entries.push({ item, snapshot: doc });
+          (!accountType || item.accountType === accountType)) {
+        // Older data may have a review while its revision still says pending.
+        // Also hide superseded historical revisions without mutating history.
+        const [review, latest] = await Promise.all([
+          reviewRef(db, item.uid, item.submissionId).get(),
+          db.collection('verification_submissions').doc(item.uid).collection('revisions')
+            .where('state', '==', 'submitted').orderBy('submittedAt', 'desc')
+            .orderBy(FieldPath.documentId(), 'desc').limit(1).get(),
+        ]);
+        if (!review.exists && latest.docs[0]?.ref.path === doc.ref.path) entries.push({ item, snapshot: doc });
+      }
       if (entries.length > pageSize) { hasMore = true; break; }
     }
     if (hasMore || snapshot.docs.length < Math.min(pageSize + 1, MAX_PAGE_SIZE + 1)) break;
@@ -282,7 +296,7 @@ async function verifyStorageDocument({ bucket, document }) {
   return file;
 }
 
-async function reviewVerificationSubmission({ auth, db, bucket, actor, uid, submissionId, decision, rejectionReason, now = Date.now() }) {
+async function reviewVerificationSubmission({ auth, db, bucket, documentStore, actor, uid, submissionId, decision, rejectionReason, now = Date.now() }) {
   await assertCurrentAdmin({ auth, actor, now, requireRecentAuth: true });
   if (!validUid(uid) || !validSubmissionId(submissionId)) fail('invalid-argument', 'Invalid submission identity.');
   if (!['approved', 'rejected'].includes(decision)) fail('invalid-argument', 'Decision must be approved or rejected.');
@@ -301,7 +315,7 @@ async function reviewVerificationSubmission({ auth, db, bucket, actor, uid, subm
   const item = publicSubmission(initialSnapshot, { includeState: true });
   if (!item) fail('failed-precondition', 'Verification submission has malformed or unsupported fields.');
   if (item.state !== 'submitted' || item.verificationStatus !== 'pending') fail('failed-precondition', 'Only submitted pending revisions can be reviewed.');
-  if (decision === 'approved') await verifyStorageDocument({ bucket, document: item.document });
+  if (decision === 'approved') await (documentStore ? documentStore.verify(item.document) : verifyStorageDocument({ bucket, document: item.document }));
 
   // Re-read live Auth state after potentially long document validation and just
   // before entering the Firestore transaction.
@@ -346,6 +360,11 @@ async function reviewVerificationSubmission({ auth, db, bucket, actor, uid, subm
       ...(decision === 'rejected' ? { rejectionReason } : {}),
     });
     transaction.update(targetProfileRef, {
+      ...(decision === 'approved' ? Object.fromEntries(VERIFIED_PROFILE_FIELDS[current.accountType].map(key => [key, current.submittedFields[key]])) : {}),
+      verificationStatus: decision,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.update(targetRef, {
       verificationStatus: decision,
       updatedAt: FieldValue.serverTimestamp(),
     });
@@ -374,7 +393,7 @@ async function verifyBearerAdmin({ auth, request }) {
 function safeFilename(name) {
   return name.replace(/[\r\n"\\]/g, '_').slice(0, 255);
 }
-function createVerificationDocumentHandler({ auth, db, bucket, allowedOrigins = [] }) {
+function createVerificationDocumentHandler({ auth, db, bucket, documentStore, allowedOrigins = [] }) {
   const originSet = new Set(allowedOrigins.filter(value => typeof value === 'string' && /^https?:\/\/[^/]+$/.test(value)));
   return async function verificationDocumentHandler(request, response) {
     response.set('Cache-Control', 'private, no-store, max-age=0');
@@ -411,7 +430,7 @@ function createVerificationDocumentHandler({ auth, db, bucket, allowedOrigins = 
       if (!snapshot.exists) return reject(404, 'not-found', 'Verification submission not found.');
       const item = publicSubmission(snapshot, { includeState: true });
       if (!item || item.state !== 'submitted') return reject(404, 'not-found', 'Submitted verification document not found.');
-      const file = await verifyStorageDocument({ bucket, document: item.document });
+      const file = await (documentStore ? documentStore.verify(item.document) : verifyStorageDocument({ bucket, document: item.document }));
       response.set('Content-Type', item.document.contentType);
       response.set('Content-Length', String(item.document.size));
       response.set('Content-Disposition', `attachment; filename="${safeFilename(item.document.name)}"; filename*=UTF-8''${encodeURIComponent(item.document.name)}`);

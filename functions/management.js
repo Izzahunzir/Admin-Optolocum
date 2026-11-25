@@ -29,13 +29,37 @@ async function manageAccount({ auth, db, actor, data, now = Date.now(), demoPoli
   if (action === 'setDisabled') {
     if (typeof data.disabled !== 'boolean' || typeof data.expectedDisabled !== 'boolean') fail('invalid-argument', 'Invalid account state.');
     if (data.disabled === data.expectedDisabled) fail('invalid-argument', 'Account action must change the expected state.');
-    if (target.disabled !== data.expectedDisabled) fail('aborted', 'Account status changed. Refresh it and try again.');
+    const accessRef = db.collection('account_access').doc(uid);
+    const assignmentRef = db.collection('account_management').doc(uid);
+    const op = data.disabled ? 'disable' : 'enable';
+    const prepared = await db.runTransaction(async tx => {
+      const [a, assignment] = await Promise.all([tx.get(accessRef), tx.get(assignmentRef)]);
+      if (!assignment.exists || assignment.data().trustedAccountType !== kind || !a.exists || !Number.isSafeInteger(a.data().validAfter) || a.data().validAfter < 0 || !['active', 'disabled'].includes(a.data().state)) fail('failed-precondition', 'Account access requires administrator recovery.');
+      const value = a.data();
+      if (value.operation && value.operation !== op) fail('aborted', 'Another account transition needs recovery.');
+      if (!value.operation && value.state !== (target.disabled ? 'disabled' : 'active')) {
+        tx.update(accessRef, { state: 'disabled', validAfter: Math.max(value.validAfter, Math.floor(now / 1000)), operation: null });
+        return false;
+      }
+      if (!value.operation && target.disabled !== data.expectedDisabled) fail('aborted', 'Account status changed. Refresh it and try again.');
+      if (!value.operation && value.state !== (data.expectedDisabled ? 'disabled' : 'active')) fail('failed-precondition', 'Account access state is inconsistent.');
+      tx.update(accessRef, { state: 'disabled', operation: op, validAfter: Math.max(value.validAfter, Math.floor(now / 1000)) });
+      return true;
+    });
+    if (!prepared) fail('failed-precondition', 'Account access state is inconsistent and has been blocked for administrator recovery.');
     if (demoPolicy) {
       try {
         await auth.updateUser(uid, { disabled: data.disabled });
-        if (data.disabled) await auth.revokeRefreshTokens(uid);
+        await auth.revokeRefreshTokens(uid);
+        const current = await auth.getUser(uid);
+        if (current.disabled !== data.disabled || current.customClaims?.admin === true) throw new Error('Account state changed.');
+        await db.runTransaction(async tx => {
+          const currentAccess = await tx.get(accessRef);
+          if (!currentAccess.exists || currentAccess.data().operation !== op || currentAccess.data().state !== 'disabled') throw new Error('Account transition changed.');
+          tx.update(accessRef, { state: data.disabled ? 'disabled' : 'active', validAfter: Math.max(currentAccess.data().validAfter, Math.floor(Date.now() / 1000)), operation: null });
+        });
       } catch (_) {
-        fail('internal', 'Account change may be incomplete. Refresh status and request administrator recovery; do not retry blindly. Session revocation is not confirmed.');
+        fail('internal', 'Account change may be incomplete. Refresh state and retry the same action for recovery.');
       }
       return { disabled: data.disabled };
     }
@@ -47,6 +71,13 @@ async function manageAccount({ auth, db, actor, data, now = Date.now(), demoPoli
       await auth.updateUser(uid, { disabled: data.disabled });
       // Revoke on both transitions so enabling never restores existing sessions.
       await auth.revokeRefreshTokens(uid);
+      const current = await auth.getUser(uid);
+      if (current.disabled !== data.disabled || current.customClaims?.admin === true) throw new Error('Account state changed.');
+      await db.runTransaction(async tx => {
+        const currentAccess = await tx.get(accessRef);
+        if (!currentAccess.exists || currentAccess.data().operation !== op || currentAccess.data().state !== 'disabled') throw new Error('Account transition changed.');
+        tx.update(accessRef, { state: data.disabled ? 'disabled' : 'active', validAfter: Math.max(currentAccess.data().validAfter, Math.floor(Date.now() / 1000)), operation: null });
+      });
     } catch (_) {
       // Auth operations are not atomic. Never report success or blindly retry.
       fail('internal', 'Account change may be incomplete. Refresh status and request administrator recovery before retrying; session revocation is not confirmed.');

@@ -7,6 +7,9 @@ const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
 const logger = require('firebase-functions/logger');
 const { manageAccount, ManagementError } = require('./management');
 const verification = require('./verification_management');
+const finalizer = require('./finalize_verification');
+const { assignAccountType } = require('./account_assignment');
+const { FieldPath, FieldValue } = require('firebase-admin/firestore');
 const localEmulatorProject = 'demo-optolocum-account-management';
 const runningInFunctionsEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
 
@@ -43,6 +46,32 @@ function asHttpsError(error) {
   logger.error('Verification operation failed', { code: error?.code || 'unknown' });
   return new HttpsError('internal', 'The verification operation could not be completed.');
 }
+
+// Explicitly emulator-only until account assignment rules and integration are
+// independently reviewed and tested. Deploying this source cannot enable it.
+function requireVerificationIntegrationEmulator() {
+  if (!runningInFunctionsEmulator) throw new HttpsError('failed-precondition', 'Verification integration is not enabled.');
+}
+exports.assignTrustedAccountType = onCall(verificationOptions, async request => {
+  try {
+    requireVerificationIntegrationEmulator();
+    const actor = await verifiedVerificationActor(request);
+    if (actor.uid !== request.auth?.uid) throw new HttpsError('unauthenticated', 'Please sign in again.');
+    const data = request.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).sort().join(',') !== 'accountType,evidenceReference,uid') throw new HttpsError('invalid-argument', 'Invalid assignment request.');
+    return await assignAccountType({ auth: getAuth(), db: getFirestore(), actor, ...data });
+  } catch (error) { throw asHttpsError(error); }
+});
+exports.finalizeVerificationSubmission = onCall(verificationOptions, async request => {
+  try {
+    requireVerificationIntegrationEmulator();
+    return await finalizer.finalizeVerificationRequest({ request, auth: getAuth(), db: getFirestore(), bucket: verificationBucket,
+      verifyStorageDocument: verification.verifyStorageDocument, FieldPath, FieldValue });
+  } catch (error) {
+    if (['invalid-argument', 'unauthenticated', 'permission-denied', 'failed-precondition'].includes(error?.code) && !(error instanceof verification.VerificationManagementError)) throw new HttpsError(error.code, error.message);
+    throw asHttpsError(error);
+  }
+});
 
 async function verifiedVerificationActor(request) {
   return verification.verifyBearerAdmin({ auth: getAuth(), request: request.rawRequest });

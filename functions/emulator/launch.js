@@ -3,7 +3,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { PROJECT, AUTH_HOST, FIRESTORE_HOST, STORAGE_HOST, assertEmulatorEnvironment } = require('./safety');
 const mode = process.argv[2];
-if (!['start', 'test', 'rules', 'verification'].includes(mode)) throw new Error('Use launch.js start, test, rules or verification.');
+if (!['start', 'test', 'rules', 'verification', 'applicant'].includes(mode)) throw new Error('Use launch.js start, test, rules, verification or applicant.');
 // Never inherit a production project or a credential file into child processes.
 const env = { ...process.env, GCLOUD_PROJECT: PROJECT, GOOGLE_CLOUD_PROJECT: PROJECT, GCP_PROJECT: PROJECT,
   FIREBASE_AUTH_EMULATOR_HOST: AUTH_HOST, FIRESTORE_EMULATOR_HOST: FIRESTORE_HOST,
@@ -19,6 +19,7 @@ const args = [mode !== 'start' && !verificationMode ? 'emulators:exec' : 'emulat
   '--config', configPath];
 if (mode === 'test') args.push('node --test --test-concurrency=1 emulator/integration.test.js emulator/demo.integration.test.js emulator/verification.integration.test.js');
 if (mode === 'rules') args.push('node --test emulator/access/rules.test.js');
+if (mode === 'applicant') args.push('node --test emulator/applicant.integration.test.js');
 // Invoke the CLI JS directly: preserve the test command as one argument without a shell.
 const shim = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which',
   [process.platform === 'win32' ? 'firebase.cmd' : 'firebase'], { encoding: 'utf8', windowsHide: true }).trim().split(/\r?\n/)[0];
