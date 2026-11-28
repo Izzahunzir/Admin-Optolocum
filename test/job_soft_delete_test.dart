@@ -9,6 +9,36 @@ import 'package:admin_optolocum/features/admin/job_postings/managed_job_table.da
 import 'package:admin_optolocum/features/admin/job_postings/job_posting.dart';
 
 void main() {
+  test('a blocked job mutation response cannot report success', () async {
+    var enabled = true;
+    final client = MockClient((request) async {
+      final action = (jsonDecode(request.body) as Map)['action'];
+      return http.Response(
+        jsonEncode({
+          'data': {
+            'status': action == 'status' ? 'available' : 'deleted',
+            'mutationsEnabled': enabled,
+          },
+        }),
+        200,
+      );
+    });
+    addTearDown(client.close);
+    final api = JobManagementApi(
+      client: client,
+      tokenProvider: () async => 'token',
+      enabled: true,
+      project: 'optolocum-f314e',
+      baseUrl: 'https://backend.example',
+    );
+    await api.call('job');
+    enabled = false;
+    await expectLater(
+      api.call('job', action: 'softDelete', expectedStatus: 'available'),
+      throwsStateError,
+    );
+    expect(api.canChangeStatus('job'), false);
+  });
   test(
     'job UI gate is independent and cannot issue requests by default',
     () async {
@@ -48,7 +78,7 @@ void main() {
         tokenProvider: () async => 'synthetic',
         enabled: true,
         project: 'optolocum-f314e',
-        baseUrl: 'http://127.0.0.1:8787',
+        baseUrl: 'https://backend.example',
       );
       await expectLater(
         api.call('approved', expectedStatus: 'available'),
@@ -116,7 +146,7 @@ void main() {
         tokenProvider: () async => 'synthetic',
         enabled: true,
         project: 'optolocum-f314e',
-        baseUrl: 'http://127.0.0.1:8787',
+        baseUrl: 'https://backend.example',
       );
       await tester.pumpWidget(
         MaterialApp(

@@ -18,6 +18,8 @@ test('isolated real Auth/Firestore account-management integration', { timeout: 1
     await auth.createUser({ uid, email: `${uid}@example.invalid`, password: PASSWORD });
     await auth.setCustomUserClaims(uid, claims);
     await db.collection(kind === 'locum' ? 'locum_profiles' : 'practice_owner_profiles').doc(uid).set({ fullName: `Synthetic ${name}` });
+    await db.collection('account_management').doc(uid).set({ trustedAccountType: kind });
+    await db.collection('account_access').doc(uid).set({ state: 'active', validAfter: 0, operation: null });
     return uid;
   }
   async function signIn(uid) {
@@ -151,8 +153,9 @@ test('isolated real Auth/Firestore account-management integration', { timeout: 1
     const args = { auth: faultyAuth, db, actor: { uid: admin, admin: true, auth_time: now / 1000 }, data, now };
     await assert.rejects(manageAccount(args), /may be incomplete/);
     assert.equal((await auth.getUser(uid)).disabled, true);
-    await assert.rejects(manageAccount(args), /status changed/);
-    await auth.revokeRefreshTokens(uid); // Explicit recovery, synthetic UID only.
+    assert.equal((await db.collection('account_access').doc(uid).get()).data().operation, 'disable');
+    assert.deepEqual(await manageAccount({ ...args, auth }), { disabled: true });
+    assert.equal((await db.collection('account_access').doc(uid).get()).data().operation, null);
     assert.ok(Number.isFinite(Date.parse((await auth.getUser(uid)).tokensValidAfterTime)));
   });
 });

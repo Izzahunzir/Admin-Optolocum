@@ -237,6 +237,7 @@ function createLocalApp({
         VERIFICATION_QUEUE_PATH,
         VERIFICATION_DETAILS_PATH,
         VERIFICATION_REVIEW_PATH,
+        '/api/session/validate',
       ];
 
       const validPostPreflight =

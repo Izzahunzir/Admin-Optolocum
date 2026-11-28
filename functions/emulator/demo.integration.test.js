@@ -18,6 +18,8 @@ test('dynamic account and job permissions with synthetic Firebase services', { t
     await auth.createUser({ uid, email: `${uid}@example.invalid`, password });
     await auth.setCustomUserClaims(uid, claims);
     await db.collection(kind === 'locum' ? 'locum_profiles' : 'practice_owner_profiles').doc(uid).set({ verificationStatus: 'pending' });
+    await db.collection('account_management').doc(uid).set({ trustedAccountType: kind });
+    await db.collection('account_access').doc(uid).set({ state: 'active', validAfter: 0, operation: null });
     return uid;
   }
   const admin = await seed('admin', 'locum', { admin: true }), locum = await seed('locum', 'locum', { role: 'locum' }), owner = await seed('owner', 'practice_owner');
@@ -108,7 +110,7 @@ test('dynamic account and job permissions with synthetic Firebase services', { t
     await request(disable());
     const result = await request(deletion);
     assert.equal(result.status, 403); assert.equal(result.body.error.code, 'permission-denied');
-    assert.match(result.body.error.message, /Delete is blocked/);
+    assert.match(result.body.error.message, /Account deletion is not allowed/);
     await assert.rejects(core(deletion), { code: 'permission-denied' });
     assert.equal((await auth.getUser(locum)).disabled, true);
     assert.equal((await db.collection('locum_profiles').doc(locum).get()).exists, true);
@@ -131,6 +133,20 @@ test('dynamic account and job permissions with synthetic Firebase services', { t
     assert.equal((await request({ ...disable(), extra: true })).status, 400);
     const uid = prefix + 'missing';
     await assert.rejects(core(disable(uid)), { code: 'auth/user-not-found' });
+  });
+  await t.test('missing, malformed, blocked and incomplete access fail closed', async () => {
+    for (const scenario of ['missing-assignment', 'missing-access', 'malformed', 'blocked', 'incomplete']) {
+      const uid = await seed(`access-${scenario}`);
+      const access = db.collection('account_access').doc(uid);
+      if (scenario === 'missing-assignment') await db.collection('account_management').doc(uid).delete();
+      if (scenario === 'missing-access') await access.delete();
+      if (scenario === 'malformed') await access.set({ state: 'active' });
+      if (scenario === 'blocked') await access.set({ state: 'deleting', validAfter: 0, operation: null });
+      if (scenario === 'incomplete') await access.set({ state: 'disabled', validAfter: 0, operation: 'enable' });
+      const result = await request(disable(uid));
+      assert.equal(result.status, 409, scenario);
+      assert.equal((await auth.getUser(uid)).disabled, false, scenario);
+    }
   });
   await t.test('job HTTP soft deletion preserves fields, applications and summaries and blocks repeats', async () => {
     const jobId = prefix + 'job', jobRef = db.collection('job_postings').doc(jobId);

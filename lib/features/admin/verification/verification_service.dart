@@ -1,15 +1,14 @@
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
+
+import '../backend_endpoint.dart';
+
 import 'package:http/http.dart' as http;
 
 import 'verification_submission.dart';
-
-const _localApiBaseUrl = 'http://127.0.0.1:8787';
 
 const _verificationQueuePath = '/api/verification/queue';
 const _verificationDetailsPath = '/api/verification/details';
@@ -27,10 +26,7 @@ class VerificationException implements Exception {
 }
 
 class VerificationQueuePage {
-  const VerificationQueuePage({
-    required this.items,
-    this.nextPageToken,
-  });
+  const VerificationQueuePage({required this.items, this.nextPageToken});
 
   final List<VerificationSubmission> items;
   final String? nextPageToken;
@@ -59,12 +55,14 @@ class VerificationService {
     this.httpClient,
     this.tokenProvider,
     this.documentBaseUrl = '',
+    this.backend = const BackendEndpoint(),
   });
 
   final VerificationCallable? callable;
   final http.Client? httpClient;
   final Future<String?> Function()? tokenProvider;
   final String documentBaseUrl;
+  final BackendEndpoint backend;
 
   // ---------------------------------------------------------------------------
   // Authentication
@@ -101,23 +99,14 @@ class VerificationService {
   // ---------------------------------------------------------------------------
 
   Uri _apiUri(String path) {
-    final base = Uri.tryParse(_localApiBaseUrl);
-
-    if (base == null ||
-        base.scheme != 'http' ||
-        base.host != '127.0.0.1' ||
-        base.port != 8787 ||
-        base.path.isNotEmpty ||
-        base.userInfo.isNotEmpty ||
-        base.hasQuery ||
-        base.hasFragment) {
+    try {
+      return backend.uri(path);
+    } on StateError {
       throw const VerificationException(
         'failed-precondition',
-        'The local verification API URL is invalid.',
+        'The HTTPS verification backend is not configured.',
       );
     }
-
-    return base.replace(path: path);
   }
 
   // ---------------------------------------------------------------------------
@@ -134,32 +123,29 @@ class VerificationService {
       return await callable!(callableName, data);
     }
 
+    final endpoint = _apiUri(path);
     final token = await _requireToken();
     final client = httpClient ?? http.Client();
 
     try {
+      final request = http.Request('POST', endpoint)
+        ..followRedirects = false
+        ..headers.addAll({
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        })
+        ..body = jsonEncode(data);
       final response = await client
-          .post(
-            _apiUri(path),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode(data),
-          )
+          .send(request)
+          .then(http.Response.fromStream)
           .timeout(const Duration(seconds: 45));
 
       if (response.statusCode != 200) {
-        throw _httpError(
-          response.statusCode,
-          response.bodyBytes,
-        );
+        throw _httpError(response.statusCode, response.bodyBytes);
       }
 
-      final decoded = jsonDecode(
-        utf8.decode(response.bodyBytes),
-      );
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
 
       if (decoded is! Map || !decoded.containsKey('data')) {
         throw const VerificationException(
@@ -177,7 +163,7 @@ class VerificationService {
     } on http.ClientException {
       throw const VerificationException(
         'unavailable',
-        'The local verification API could not be reached. Check that the local server is running.',
+        'The verification service could not be reached.',
       );
     } on FormatException {
       throw const VerificationException(
@@ -200,15 +186,11 @@ class VerificationService {
     String? pageToken,
     int pageSize = 25,
   }) async {
-    final raw = await _call(
-      _verificationQueuePath,
-      {
-        'accountType': ?accountType,
-        'pageToken': ?pageToken,
-        'pageSize': pageSize,
-      },
-      callableName: 'listPendingVerificationSubmissions',
-    );
+    final raw = await _call(_verificationQueuePath, {
+      'accountType': ?accountType,
+      'pageToken': ?pageToken,
+      'pageSize': pageSize,
+    }, callableName: 'listPendingVerificationSubmissions');
 
     if (raw is! Map || raw['items'] is! List) {
       throw const VerificationException(
@@ -218,12 +200,7 @@ class VerificationService {
     }
 
     final items = (raw['items'] as List)
-        .map(
-          (value) => VerificationSubmission.tryParse(
-            value,
-            queueItem: true,
-          ),
-        )
+        .map((value) => VerificationSubmission.tryParse(value, queueItem: true))
         .whereType<VerificationSubmission>()
         .where((item) => item.isPending)
         .toList(growable: false);
@@ -240,23 +217,18 @@ class VerificationService {
   // Submission details and history
   // ---------------------------------------------------------------------------
 
-  Future<(VerificationSubmission, VerificationHistoryPage)>
-      getSubmission({
+  Future<(VerificationSubmission, VerificationHistoryPage)> getSubmission({
     required String uid,
     required String submissionId,
     String? historyPageToken,
     int historyPageSize = 25,
   }) async {
-    final raw = await _call(
-      _verificationDetailsPath,
-      {
-        'uid': uid,
-        'submissionId': submissionId,
-        'historyPageSize': historyPageSize,
-        'historyPageToken': ?historyPageToken,
-      },
-      callableName: 'getVerificationSubmission',
-    );
+    final raw = await _call(_verificationDetailsPath, {
+      'uid': uid,
+      'submissionId': submissionId,
+      'historyPageSize': historyPageSize,
+      'historyPageToken': ?historyPageToken,
+    }, callableName: 'getVerificationSubmission');
 
     if (raw is! Map) {
       throw const VerificationException(
@@ -265,9 +237,7 @@ class VerificationService {
       );
     }
 
-    final selected = VerificationSubmission.tryParse(
-      raw['submission'],
-    );
+    final selected = VerificationSubmission.tryParse(raw['submission']);
 
     if (selected == null) {
       throw const VerificationException(
@@ -280,9 +250,9 @@ class VerificationService {
 
     final parsed = rawHistory is List
         ? rawHistory
-            .map(VerificationSubmission.tryParse)
-            .whereType<VerificationSubmission>()
-            .toList(growable: false)
+              .map(VerificationSubmission.tryParse)
+              .whereType<VerificationSubmission>()
+              .toList(growable: false)
         : const <VerificationSubmission>[];
 
     final omitted = raw['historyOmittedCount'] is num
@@ -316,24 +286,28 @@ class VerificationService {
   }) async {
     if (!['approved', 'rejected'].contains(decision) ||
         (decision == 'rejected' &&
-            (rejectionReason == null ||
-                rejectionReason.trim().isEmpty))) {
+            (rejectionReason == null || rejectionReason.trim().isEmpty))) {
       throw const VerificationException(
         'invalid-argument',
         'Choose a valid decision and provide a rejection reason when rejecting.',
       );
     }
 
-    await _call(
-      _verificationReviewPath,
-      {
-        'uid': uid,
-        'submissionId': submissionId,
-        'decision': decision,
-        'rejectionReason': ?rejectionReason,
-      },
-      callableName: 'reviewVerificationSubmission',
-    );
+    final result = await _call(_verificationReviewPath, {
+      'uid': uid,
+      'submissionId': submissionId,
+      'decision': decision,
+      'rejectionReason': ?rejectionReason,
+    }, callableName: 'reviewVerificationSubmission');
+    if (result is! Map ||
+        result['uid'] != uid ||
+        result['submissionId'] != submissionId ||
+        result['decision'] != decision) {
+      throw const VerificationException(
+        'internal',
+        'The verification decision could not be confirmed. Refresh before retrying.',
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -359,10 +333,7 @@ class VerificationService {
 
     final token = await _requireToken();
 
-    final uri = _documentUri(
-      submission.uid,
-      submission.submissionId,
-    );
+    final uri = _documentUri(submission.uid, submission.submissionId);
 
     final client = httpClient ?? http.Client();
 
@@ -377,17 +348,12 @@ class VerificationService {
           .timeout(const Duration(seconds: 45));
 
       if (response.statusCode != 200) {
-        throw _httpError(
-          response.statusCode,
-          response.bodyBytes,
-        );
+        throw _httpError(response.statusCode, response.bodyBytes);
       }
 
-      final returnedType =
-          response.headers['content-type']?.split(';').first;
+      final returnedType = response.headers['content-type']?.split(';').first;
 
-      if (returnedType != metadata.contentType ||
-          response.bodyBytes.isEmpty) {
+      if (returnedType != metadata.contentType || response.bodyBytes.isEmpty) {
         throw const VerificationException(
           'failed-precondition',
           'The private document response did not match the submission.',
@@ -421,48 +387,30 @@ class VerificationService {
   // ---------------------------------------------------------------------------
 
   Uri _documentUri(String uid, String submissionId) {
-    final configured = documentBaseUrl.trim();
-
-    final base = configured.isEmpty
-        ? _defaultDocumentEndpoint()
-        : Uri.tryParse(configured);
-
-    if (base == null ||
-        base.scheme != 'http' ||
-        base.host != '127.0.0.1' ||
-        base.port != 8787 ||
-        base.path != _verificationDocumentPath ||
-        base.userInfo.isNotEmpty ||
-        base.hasQuery ||
-        base.hasFragment) {
+    if (documentBaseUrl.isNotEmpty) {
       throw const VerificationException(
         'failed-precondition',
-        'The local private document endpoint is not configured correctly.',
+        'A separate document endpoint is not supported.',
       );
     }
-
-    return base.replace(
-      queryParameters: {
-        'uid': uid,
-        'submissionId': submissionId,
-      },
-    );
-  }
-
-  Uri _defaultDocumentEndpoint() {
-    return Uri.parse(
-      '$_localApiBaseUrl$_verificationDocumentPath',
-    );
+    try {
+      return backend.uri(
+        _verificationDocumentPath,
+        queryParameters: {'uid': uid, 'submissionId': submissionId},
+      );
+    } on StateError {
+      throw const VerificationException(
+        'failed-precondition',
+        'The HTTPS document backend is not configured.',
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
   // HTTP error handling
   // ---------------------------------------------------------------------------
 
-  VerificationException _httpError(
-    int status,
-    List<int> body,
-  ) {
+  VerificationException _httpError(int status, List<int> body) {
     try {
       final decoded = jsonDecode(utf8.decode(body));
 

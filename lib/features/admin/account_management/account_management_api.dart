@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:cloud_functions/cloud_functions.dart';
+import '../backend_endpoint.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -15,7 +16,7 @@ class AccountManagementApi {
   AccountManagementApi({
     this.client,
     this.tokenProvider,
-    this.baseUrl = const String.fromEnvironment('ACCOUNT_API_BASE_URL'),
+    this.baseUrl = const String.fromEnvironment('ADMIN_BACKEND_URL'),
     this.demoMutations = const bool.fromEnvironment('FYP_DEMO_MUTATIONS'),
     this.demoProject = const String.fromEnvironment('FYP_DEMO_PROJECT'),
   }) : _mockTransport = null;
@@ -48,7 +49,9 @@ class AccountManagementApi {
       _mockTransport != null ||
       (demoMutations &&
           demoProject == 'optolocum-f314e' &&
-          baseUrl == 'http://127.0.0.1:8787');
+          (baseUrl.startsWith('https://') ||
+              (const bool.fromEnvironment('FYP_USE_FIREBASE_EMULATORS') &&
+                  baseUrl == 'http://127.0.0.1:8787')));
   bool canManage(String uid, String kind) =>
       _mockTransport != null ||
       (accountChangesEnabled && _approvedTargets.contains((uid, kind)));
@@ -136,37 +139,16 @@ class AccountManagementApi {
         );
       }
     }
-    if (baseUrl.isEmpty) {
-      try {
-        final result = await FirebaseFunctions.instanceFor(
-          region: 'asia-southeast1',
-        ).httpsCallable('manageAccount').call<dynamic>(data);
-        return Map<String, dynamic>.from(result.data as Map);
-      } on FirebaseFunctionsException catch (error) {
-        throw AccountManagementException(
-          error.code,
-          error.message ?? 'Account status unavailable.',
-        );
-      }
-    }
-    final base = Uri.tryParse(baseUrl);
-    if (base == null ||
-        base.scheme != 'http' ||
-        base.host != '127.0.0.1' ||
-        base.port != 8787 ||
-        base.userInfo.isNotEmpty ||
-        (base.path.isNotEmpty && base.path != '/') ||
-        base.hasQuery ||
-        base.hasFragment) {
+    final Uri endpoint;
+    try {
+      endpoint = BackendEndpoint(
+        baseUrl: baseUrl,
+        localDemo: const bool.fromEnvironment('FYP_USE_FIREBASE_EMULATORS'),
+      ).uri('/api/accounts/manage');
+    } on StateError {
       throw const AccountManagementException(
-        'invalid-argument',
-        'The local API URL must be http://127.0.0.1:8787.',
-      );
-    }
-    if (kIsWeb && Uri.base.origin != 'http://localhost:5174') {
-      throw const AccountManagementException(
-        'origin-not-allowed',
-        'Open the dashboard at http://localhost:5174 to use the local status API.',
+        'failed-precondition',
+        'The HTTPS account backend is not configured.',
       );
     }
     final String? token;
@@ -189,7 +171,7 @@ class AccountManagementApi {
     }
     final requestClient = client ?? http.Client();
     try {
-      final request = http.Request('POST', base.resolve('/api/accounts/manage'))
+      final request = http.Request('POST', endpoint)
         ..followRedirects = false
         ..headers.addAll({
           'Authorization': 'Bearer $token',
@@ -223,6 +205,12 @@ class AccountManagementApi {
           (action == 'setDisabled' && result['disabled'] != disabled)) {
         throw const FormatException();
       }
+      if (action != 'status' && result['mutationsEnabled'] != true) {
+        throw const AccountManagementException(
+          'failed-precondition',
+          'Account changes are unavailable. Refresh status before retrying.',
+        );
+      }
       if (accountChangesEnabled &&
           result['mutationsEnabled'] == true &&
           action != 'delete') {
@@ -235,19 +223,19 @@ class AccountManagementApi {
       _approvedTargets.remove((uid, kind));
       throw const AccountManagementException(
         'unavailable',
-        'Local server timed out. Check that it is running.',
+        'Account service timed out. Refresh status before retrying.',
       );
     } on http.ClientException {
       _approvedTargets.remove((uid, kind));
       throw const AccountManagementException(
         'unavailable',
-        'Cannot reach the local status API. Check the server, http://localhost:5174 origin, CORS and Chrome local-network permissions.',
+        'The account service could not be reached.',
       );
     } on FormatException {
       _approvedTargets.remove((uid, kind));
       throw const AccountManagementException(
         'internal',
-        'Invalid response from the local server.',
+        'Invalid response from the account service.',
       );
     } on AccountManagementException {
       _approvedTargets.remove((uid, kind));

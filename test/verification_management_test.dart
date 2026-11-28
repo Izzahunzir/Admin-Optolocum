@@ -1,3 +1,5 @@
+import 'package:admin_optolocum/features/admin/backend_endpoint.dart';
+
 import 'dart:convert';
 
 import 'package:admin_optolocum/features/admin/verification/verification_service.dart';
@@ -162,7 +164,11 @@ void main() {
           callable: (name, data) async {
             expect(name, 'reviewVerificationSubmission');
             requests.add(data);
-            return <String, dynamic>{};
+            return <String, dynamic>{
+              'uid': data['uid'],
+              'submissionId': data['submissionId'],
+              'decision': data['decision'],
+            };
           },
         );
         await service.review(
@@ -206,7 +212,7 @@ void main() {
         final service = VerificationService(
           httpClient: client,
           tokenProvider: () async => 'fresh-id-token',
-          documentBaseUrl: 'https://asia-southeast1-demo-project.cloudfunctions.net/getVerificationDocument',
+          backend: const BackendEndpoint(baseUrl: 'https://backend.example'),
         );
         final submission = VerificationSubmission.tryParse(_submission())!;
         final doc = await service.fetchDocument(submission);
@@ -249,7 +255,7 @@ void main() {
           throw StateError('Unexpected callable $name');
         },
         tokenProvider: () async => 'test-id-token',
-        documentBaseUrl: 'https://asia-southeast1-demo-project.cloudfunctions.net/getVerificationDocument',
+        backend: const BackendEndpoint(baseUrl: 'https://backend.example'),
         httpClient: MockClient(
           (request) async => http.Response.bytes(
             [37, 80, 68, 70, 45],

@@ -10,7 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 class _Api extends AccountManagementApi {
-  _Api(this.disabled) : super(baseUrl: 'http://127.0.0.1:8787');
+  _Api(this.disabled) : super(baseUrl: 'https://backend.example');
   final bool disabled;
   int mutations = 0;
   int reads = 0;
@@ -33,39 +33,42 @@ class _Api extends AccountManagementApi {
 }
 
 void main() {
-  test('HTTP status attaches a token and uses only the configured loopback endpoint', () async {
-    final client = MockClient((request) async {
-      expect(
-        request.url.toString(),
-        'http://127.0.0.1:8787/api/accounts/manage',
-      );
-      expect(request.headers['Authorization'], 'Bearer test-token');
-      expect(request.followRedirects, false);
-      expect(jsonDecode(request.body), {
-        'uid': 'target',
-        'kind': 'locum',
-        'action': 'status',
+  test(
+    'HTTPS status attaches a token and uses the configured endpoint',
+    () async {
+      final client = MockClient((request) async {
+        expect(
+          request.url.toString(),
+          'https://backend.example/api/accounts/manage',
+        );
+        expect(request.headers['Authorization'], 'Bearer test-token');
+        expect(request.followRedirects, false);
+        expect(jsonDecode(request.body), {
+          'uid': 'target',
+          'kind': 'locum',
+          'action': 'status',
+        });
+        return http.Response(
+          jsonEncode({
+            'data': {'disabled': true, 'mutationsEnabled': false},
+          }),
+          200,
+        );
       });
-      return http.Response(
-        jsonEncode({
-          'data': {'disabled': true, 'mutationsEnabled': false},
-        }),
-        200,
+      final api = AccountManagementApi(
+        client: client,
+        baseUrl: 'https://backend.example',
+        tokenProvider: () async => 'test-token',
       );
-    });
-    final api = AccountManagementApi(
-      client: client,
-      baseUrl: 'http://127.0.0.1:8787',
-      tokenProvider: () async => 'test-token',
-    );
-    expect((await api.call('target', 'locum', 'status'))['disabled'], true);
-    client.close();
-  });
+      expect((await api.call('target', 'locum', 'status'))['disabled'], true);
+      client.close();
+    },
+  );
 
   test(
     'all transports reject mutations before authentication or network access',
     () async {
-      for (final url in ['', 'http://127.0.0.1:8787']) {
+      for (final url in ['', 'https://backend.example']) {
         final api = AccountManagementApi(
           baseUrl: url,
           tokenProvider: () async => throw StateError('must not be called'),
@@ -91,7 +94,7 @@ void main() {
 
   test('invalid URLs cannot receive a Firebase ID token', () async {
     final api = AccountManagementApi(
-      baseUrl: 'https://example.com',
+      baseUrl: 'http://example.com',
       tokenProvider: () async =>
           throw StateError('token must not be requested'),
     );
@@ -101,7 +104,7 @@ void main() {
         isA<AccountManagementException>().having(
           (e) => e.code,
           'code',
-          'invalid-argument',
+          'failed-precondition',
         ),
       ),
     );
@@ -121,7 +124,7 @@ void main() {
     );
     final api = AccountManagementApi(
       client: client,
-      baseUrl: 'http://127.0.0.1:8787',
+      baseUrl: 'https://backend.example',
       tokenProvider: () async => 'token',
     );
     await expectLater(
@@ -206,7 +209,7 @@ void main() {
         () async => throw FirebaseAuthException(code: 'user-disabled'),
       ]) {
         final api = AccountManagementApi(
-          baseUrl: 'http://127.0.0.1:8787',
+          baseUrl: 'https://backend.example',
           tokenProvider: provider,
         );
         await expectLater(
@@ -223,32 +226,33 @@ void main() {
     },
   );
 
-  test(
-    'network and browser-blocked requests show safe CORS and origin guidance',
-    () async {
-      final client = MockClient(
-        (_) async => throw http.ClientException('PRIVATE INTERNAL DETAILS'),
-      );
-      final api = AccountManagementApi(
-        client: client,
-        baseUrl: 'http://127.0.0.1:8787',
-        tokenProvider: () async => 'synthetic-token',
-      );
-      await expectLater(
-        api.call('uid', 'locum', 'status'),
-        throwsA(
-          isA<AccountManagementException>()
-              .having((e) => e.message, 'message', contains('CORS'))
-              .having(
-                (e) => e.message,
-                'safe message',
-                isNot(contains('PRIVATE')),
-              ),
-        ),
-      );
-      client.close();
-    },
-  );
+  test('network and browser-blocked requests show a safe error', () async {
+    final client = MockClient(
+      (_) async => throw http.ClientException('PRIVATE INTERNAL DETAILS'),
+    );
+    final api = AccountManagementApi(
+      client: client,
+      baseUrl: 'https://backend.example',
+      tokenProvider: () async => 'synthetic-token',
+    );
+    await expectLater(
+      api.call('uid', 'locum', 'status'),
+      throwsA(
+        isA<AccountManagementException>()
+            .having(
+              (e) => e.message,
+              'message',
+              contains('could not be reached'),
+            )
+            .having(
+              (e) => e.message,
+              'safe message',
+              isNot(contains('PRIVATE')),
+            ),
+      ),
+    );
+    client.close();
+  });
 
   testWidgets(
     'read-only status error is visible and the refresh diagnostic recovers',
