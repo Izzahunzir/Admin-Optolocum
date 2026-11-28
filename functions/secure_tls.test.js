@@ -64,6 +64,22 @@ test('HTTPS listener validates TLS, origin, authorization and mutation gates', {
   assert.equal(await request('/api/verification/review', 'http://localhost:5175', 'Bearer test'), 503);
   assert.equal(await request('/api/enrollment', 'http://localhost:5174', 'Bearer test'), 404);
   assert.equal(tokenChecks, 3);
+  const activeApp = createLocalApp({ auth, db, verificationManager: { ...verificationManager, createVerificationDocumentHandler: () => () => {} }, documentStore: { put() {} }, realPreparationOnly: true, realVerificationEnabled: true, transport: config, demoPolicy: { accountMutationsEnabled: true, jobSoftDeleteEnabled: true } });
+  const activeServer = https.createServer(options, activeApp);
+  await new Promise(resolve => activeServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => activeServer.close(resolve)));
+  const activeRequest = (route, method = 'POST') => new Promise((resolve, reject) => {
+    const req = https.request({ host: '127.0.0.1', port: activeServer.address().port, servername: 'localhost', ca, path: route, method,
+      headers: { host: 'localhost:8787', origin: 'http://localhost:5174', 'content-type': 'application/json', ...(method === 'OPTIONS' ? { 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' } : {}) } }, res => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.on('error', reject); req.end(method === 'POST' ? '{}' : undefined);
+  });
+  assert.equal(await activeRequest('/api/enrollment', 'OPTIONS'), 204);
+  assert.equal(await activeRequest('/api/applicant/upload/0123456789abcdef0123456789abcdef', 'OPTIONS'), 204);
+  assert.equal(await activeRequest('/api/enrollment'), 400);
+  assert.equal(await activeRequest('/api/applicant/draft'), 401);
+  assert.equal(await activeRequest('/api/verification/review'), 401);
+  assert.equal(await activeRequest('/api/accounts/manage'), 503);
+  assert.equal(await activeRequest('/api/jobs/soft-delete'), 503);
   await assert.rejects(new Promise((resolve, reject) => {
     const req = https.get({ host: '127.0.0.1', port: server.address().port, servername: 'localhost', path: '/health' }, resolve);
     req.on('error', reject);

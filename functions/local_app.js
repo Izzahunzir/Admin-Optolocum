@@ -99,6 +99,7 @@ function createLocalApp({
   documentStore = null,
   applicantEmulatorOnly = false,
   realPreparationOnly = false,
+  realVerificationEnabled = false,
   transport = null,
   manager = manageAccount,
   verificationManager = verification,
@@ -241,7 +242,7 @@ function createLocalApp({
       ];
 
       const validPostPreflight =
-        (postPaths.includes(req.path) || (applicantEmulatorOnly && (req.path === '/api/enrollment' || /^\/api\/applicant\/(?:draft|finalize|upload\/[a-f0-9]{32})$/.test(req.path)))) &&
+        (postPaths.includes(req.path) || ((applicantEmulatorOnly || (realPreparationOnly && realVerificationEnabled)) && (req.path === '/api/enrollment' || /^\/api\/applicant\/(?:draft|finalize|upload\/[a-f0-9]{32})$/.test(req.path)))) &&
         requestedMethod === "POST";
 
       const validDocumentPreflight =
@@ -294,7 +295,7 @@ function createLocalApp({
   app.get("/health", (req, res) => {
   return res.status(200).json({
     status: "ok",
-    mode: realPreparationOnly ? "real-firebase-preparation" : "local",
+    mode: realPreparationOnly ? (realVerificationEnabled ? "real-firebase-verification" : "real-firebase-preparation") : "local",
     accountMutationsEnabled:
       demoPolicy?.accountMutationsEnabled === true,
     jobSoftDeleteEnabled:
@@ -302,28 +303,27 @@ function createLocalApp({
   });
 });
 
-  // This mode has no activation switch: mutation routes require a future,
-  // separately reviewed implementation before they can reach business logic.
+  // The real verification mode never enables unrelated management mutations.
   if (realPreparationOnly) {
     app.use((req, res, next) => {
-      if ([API_PATH, JOB_PATH, VERIFICATION_REVIEW_PATH].includes(req.path)) {
+      if ([API_PATH, JOB_PATH].includes(req.path) || (req.path === VERIFICATION_REVIEW_PATH && !realVerificationEnabled)) {
         return reject(res, 503, 'unavailable', 'Mutations are not activated.');
       }
       next();
     });
   }
 
-  if (applicantEmulatorOnly) {
+  if (applicantEmulatorOnly || (realPreparationOnly && realVerificationEnabled)) {
     const { assertEmulatorEnvironment } = require('./emulator/safety');
     const { createApplicantRouter } = require('./applicant_submission');
     const { createEnrollmentRouter } = require('./account_enrollment');
-    assertEmulatorEnvironment();
+    if (applicantEmulatorOnly) assertEmulatorEnvironment();
     app.use('/api/applicant', (req, res, next) => {
-      try { assertEmulatorEnvironment(); next(); }
+      try { if (applicantEmulatorOnly) assertEmulatorEnvironment(); next(); }
       catch (_) { res.status(503).json({ error: { code: 'unavailable', message: 'Applicant submissions are unavailable.' } }); }
     }, createApplicantRouter({ auth, db, documentStore }));
     app.use('/api/enrollment', (req, res, next) => {
-      try { assertEmulatorEnvironment(); next(); }
+      try { if (applicantEmulatorOnly) assertEmulatorEnvironment(); next(); }
       catch (_) { res.status(503).json({ error: { code: 'unavailable', message: 'Enrollment is unavailable.' } }); }
     }, createEnrollmentRouter({ auth, db }));
   }

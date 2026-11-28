@@ -1,6 +1,6 @@
 # HTTPS for local Firebase preparation
 
-This listener is HTTPS-only, uses the real project configuration and keeps all real mutation endpoints blocked. No Firebase Storage, Cloud Functions, paid certificate or hosting is used. The preferred phone connection is USB with `adb reverse`: the server stays on the laptop's loopback interface. The phone and laptop still need ordinary internet access to Firebase Auth and Firestore.
+This listener is HTTPS-only. The commands below start the read-only preparation mode. An explicitly selected `verification-active` mode additionally mounts enrollment and applicant submission and allows verification review; use it only after separate authorization for live mutations. No Firebase Storage, Cloud Functions, paid certificate or hosting is used. The preferred phone connection is USB with `adb reverse`: the server stays on the laptop's loopback interface. The phone and laptop still need ordinary internet access to Firebase Auth and Firestore.
 
 ## 1. Create a private CA and server certificate
 
