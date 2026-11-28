@@ -13,8 +13,8 @@ const ownerProfile = () => ({ fullName: 'Synthetic Owner', email: 'owner@example
 const access = (state = 'active', validAfter = 1000) => ({ state, validAfter, updatedAt: Timestamp.fromMillis(1000000), updatedBy: 'synthetic-migration', schemaVersion: 1 });
 
 test('candidate preserves the supplied baseline except for the explicit access gate', () => {
-  const baseline = readFileSync(path.join(__dirname, 'production-supplied.rules'), 'utf8');
-  const candidate = readFileSync(path.join(__dirname, 'candidate.rules'), 'utf8')
+  const baseline = readFileSync(path.join(__dirname, 'production-supplied.rules'), 'utf8').replaceAll('\r\n', '\n');
+  const candidate = readFileSync(path.join(__dirname, 'candidate.rules'), 'utf8').replaceAll('\r\n', '\n')
     .replace(/^\/\/ EMULATOR ONLY[^\n]*\n/, '')
     .replace(/\n    \/\/ BEGIN candidate-only access gate[\s\S]*?    \/\/ END candidate-only access gate\.\n/, '');
   assert.equal(candidate, baseline.replaceAll('request.auth != null', 'hasActiveSession()'));

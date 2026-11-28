@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
+import '../backend_endpoint.dart';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 
@@ -10,7 +11,7 @@ class JobManagementApi {
     this.tokenProvider,
     this.enabled = const bool.fromEnvironment('FYP_JOB_SOFT_DELETE'),
     this.project = const String.fromEnvironment('FYP_DEMO_PROJECT'),
-    this.baseUrl = const String.fromEnvironment('ACCOUNT_API_BASE_URL'),
+    this.baseUrl = const String.fromEnvironment('ADMIN_BACKEND_URL'),
   });
   final http.Client? client;
   final Future<String?> Function()? tokenProvider;
@@ -19,7 +20,9 @@ class JobManagementApi {
   bool get configured =>
       enabled &&
       project == 'optolocum-f314e' &&
-      baseUrl == 'http://127.0.0.1:8787';
+      (baseUrl.startsWith('https://') ||
+          (const bool.fromEnvironment('FYP_USE_FIREBASE_EMULATORS') &&
+              baseUrl == 'http://127.0.0.1:8787'));
   final Set<String> _approved = {};
   bool canChangeStatus(String id) => configured && _approved.contains(id);
   Future<Map<String, dynamic>> call(
@@ -36,9 +39,6 @@ class JobManagementApi {
     if (!configured || (action != 'status' && !canChangeStatus(id))) {
       throw StateError('Job status changes are off or not approved.');
     }
-    if (kIsWeb && Uri.base.origin != 'http://localhost:5174') {
-      throw StateError('Open the dashboard at http://localhost:5174.');
-    }
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,128}$').hasMatch(id)) {
       throw StateError('Invalid job ID.');
     }
@@ -52,7 +52,15 @@ class JobManagementApi {
         throw StateError('Please sign in as an administrator.');
       }
       final request =
-          http.Request('POST', Uri.parse('$baseUrl/api/jobs/soft-delete'))
+          http.Request(
+              'POST',
+              BackendEndpoint(
+                baseUrl: baseUrl,
+                localDemo: const bool.fromEnvironment(
+                  'FYP_USE_FIREBASE_EMULATORS',
+                ),
+              ).uri('/api/jobs/soft-delete'),
+            )
             ..followRedirects = false
             ..headers.addAll({
               'Authorization': 'Bearer $token',
@@ -82,6 +90,11 @@ class JobManagementApi {
           (action == 'softDelete' && data['status'] != 'deleted') ||
           (action == 'restore' && data['status'] == 'deleted')) {
         throw StateError('Invalid job response.');
+      }
+      if (action != 'status' && data['mutationsEnabled'] != true) {
+        throw StateError(
+          'Job changes are unavailable. Refresh before retrying.',
+        );
       }
       if (data['mutationsEnabled'] == true) {
         _approved.add(id);

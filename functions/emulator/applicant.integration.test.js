@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, randomUUID } = require('node:crypto');
@@ -18,7 +18,7 @@ assertEmulatorEnvironment();
 const locum = { fullName: 'Synthetic Locum', email: 'synthetic@example.invalid', nric: '990101010101', phoneNumber: '0123456789', gender: 'Female', dateOfBirth: '1999-01-01', highestEducation: 'Degree', course: 'Optometry' };
 const owner = { practiceType: 'Retail Optical Store', clinicName: 'Synthetic Clinic', registrationNumber: '123', address: 'Test Street', state: 'Johor', contactNumber: '0123456789', companyEmail: 'synthetic@example.invalid' };
 const rid = () => randomBytes(16).toString('hex');
-test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, async t => {
+test('isolated applicant HTTP workflow and authorization', { timeout: 240000 }, async t => {
   const { app, auth, db } = createEmulatorServices();
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'opt-http-test-'));
   if (process.platform === 'win32') {
@@ -109,6 +109,8 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
     const requestId = rid(), payload = { requestId, accountType, submittedFields: fields[accountType] };
     const created = await call('/api/applicant/draft', u.token, payload); assert.equal(created.status, 200, `${accountType}: ${JSON.stringify(created.body)}`);
     assert.deepEqual((await call('/api/applicant/draft', u.token, payload)).body, created.body);
+    const recoveredDrafts = await Promise.all([call('/api/applicant/draft', u.token, payload), call('/api/applicant/draft', u.token, payload)]);
+    assert.ok(recoveredDrafts.every(result => result.status === 200 && result.body.data.submissionId === created.body.data.submissionId));
     if (accountType === 'locum') {
       await new Promise(resolve => {
         const request = http.request({ host: HOST, port: PORT, path: '/api/applicant/upload/' + requestId, method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${u.token}`, 'content-type': 'application/pdf', 'content-length': 1000 } });
@@ -148,61 +150,119 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
   assert.equal((await call('/api/applicant/upload/' + newId, p.token, Buffer.from('%PDF-new'), 'application/pdf')).status, 200);
   assert.equal((await call('/api/applicant/finalize', p.token, { requestId: newId })).status, 200);
   assert.equal((await db.collection('practice_owner_profiles').doc(p.uid).get()).data().clinicName, undefined);
-  const nextId = rid();
-  const next = await call('/api/applicant/draft', p.token, { requestId: nextId, accountType: 'practice_owner', submittedFields: owner });
-  assert.equal(next.status, 200);
-  assert.equal((await call('/api/applicant/upload/' + nextId, p.token, Buffer.from('%PDF-latest'), 'application/pdf')).status, 200);
+  // A rejected owner can submit corrected information; prior revisions stay intact.
+  const ownerRevision = (await db.collection('verification_submissions').doc(p.uid).collection('revisions').doc(results[1].submissionId).get()).data();
+  assert.equal(ownerRevision.verificationStatus, 'rejected');
   const pending = await call('/api/verification/queue', admin.token, {});
-  const previous = pending.body.data.items.find(item => item.uid === p.uid);
-  const race = await Promise.all([
-    call('/api/applicant/finalize', p.token, { requestId: nextId }),
-    call('/api/verification/review', admin.token, { uid: p.uid, submissionId: previous.submissionId, decision: 'approved' }),
-  ]);
-  assert.equal(race[0].status, 200);
-  assert.ok([200, 409].includes(race[1].status));
-  assert.equal((await db.collection('practice_owner_profiles').doc(p.uid).get()).data().verificationStatus, 'pending');
-  const ownerEdit = { fullName: 'Edited Owner', phoneNumber: '01122223333', email: 'edited-owner@example.invalid', role: 'HR' };
-  const [ownerReview] = await Promise.all([
-    call('/api/verification/review', admin.token, { uid: p.uid, submissionId: next.body.data.submissionId, decision: 'approved' }),
-    db.collection('practice_owner_profiles').doc(p.uid).update(ownerEdit),
-  ]);
-  assert.equal(ownerReview.status, 200);
-  const ownerApproved = (await db.collection('practice_owner_profiles').doc(p.uid).get()).data();
-  assert.equal(ownerApproved.clinicName, owner.clinicName);
-  for (const [key, value] of Object.entries(ownerEdit)) assert.equal(ownerApproved[key], value);
-  assert.equal(ownerApproved.companyEmail, undefined); assert.equal(ownerApproved.contactNumber, undefined);
-  const rejectId = rid(), ownerChange = { ...owner, clinicName: 'Unapproved Clinic' };
-  const rejectDraft = await call('/api/applicant/draft', p.token, { requestId: rejectId, accountType: 'practice_owner', submittedFields: ownerChange });
-  assert.equal((await call('/api/applicant/upload/' + rejectId, p.token, Buffer.from('%PDF-next-owner'), 'application/pdf')).status, 200);
-  assert.equal((await call('/api/applicant/finalize', p.token, { requestId: rejectId })).status, 200);
-  assert.equal((await db.collection('practice_owner_profiles').doc(p.uid).get()).data().clinicName, owner.clinicName);
-  assert.equal((await call('/api/verification/review', admin.token, { uid: p.uid, submissionId: rejectDraft.body.data.submissionId, decision: 'rejected', rejectionReason: 'Synthetic reason' })).status, 200);
-  assert.equal((await db.collection('practice_owner_profiles').doc(p.uid).get()).data().clinicName, owner.clinicName);
-  const locumChange = { ...locum, fullName: 'Changed Synthetic Name' }, locumId = rid();
-  const changed = await call('/api/applicant/draft', l.token, { requestId: locumId, accountType: 'locum', submittedFields: locumChange });
-  assert.equal((await call('/api/applicant/upload/' + locumId, l.token, Buffer.from('%PDF-new-locum'), 'application/pdf')).status, 200);
-  assert.equal((await call('/api/applicant/finalize', l.token, { requestId: locumId })).status, 200);
-  assert.equal((await db.collection('locum_profiles').doc(l.uid).get()).data().fullName, locum.fullName);
-  const locumEdit = { email: 'new-contact@example.invalid', phoneNumber: '0191234567', gender: 'Other' };
-  const [locumReview] = await Promise.all([
-    call('/api/verification/review', admin.token, { uid: l.uid, submissionId: changed.body.data.submissionId, decision: 'approved' }),
-    db.collection('locum_profiles').doc(l.uid).update(locumEdit),
-  ]);
-  assert.equal(locumReview.status, 200);
-  const locumApproved = (await db.collection('locum_profiles').doc(l.uid).get()).data();
-  assert.equal(locumApproved.fullName, locumChange.fullName);
-  for (const [key, value] of Object.entries(locumEdit)) assert.equal(locumApproved[key], value);
-  const locumRejectedId = rid();
-  const locumRejected = await call('/api/applicant/draft', l.token, { requestId: locumRejectedId, accountType: 'locum', submittedFields: { ...locum, fullName: 'Rejected Name' } });
-  assert.equal((await call('/api/applicant/upload/' + locumRejectedId, l.token, Buffer.from('%PDF-locum-reject'), 'application/pdf')).status, 200);
-  assert.equal((await call('/api/applicant/finalize', l.token, { requestId: locumRejectedId })).status, 200);
-  assert.equal((await call('/api/verification/review', admin.token, { uid: l.uid, submissionId: locumRejected.body.data.submissionId, decision: 'rejected', rejectionReason: 'Synthetic reason' })).status, 200);
-  assert.equal((await db.collection('locum_profiles').doc(l.uid).get()).data().fullName, locumChange.fullName);
-  const locumResubmit = rid();
-  const locumResubmitted = await call('/api/applicant/draft', l.token, { requestId: locumResubmit, accountType: 'locum', submittedFields: locumChange });
-  assert.equal((await call('/api/applicant/upload/' + locumResubmit, l.token, Buffer.from('%PDF-locum-resubmit'), 'application/pdf')).status, 200);
-  assert.equal((await call('/api/applicant/finalize', l.token, { requestId: locumResubmit })).status, 200);
-  assert.equal((await call('/api/verification/review', admin.token, { uid: l.uid, submissionId: locumResubmitted.body.data.submissionId, decision: 'approved' })).status, 200);
+  const currentOwner = pending.body.data.items.find(item => item.uid === p.uid);
+  assert.equal((await call('/api/verification/review', admin.token, { uid: p.uid, submissionId: currentOwner.submissionId, decision: 'approved' })).status, 200);
+  for (const [u, type, data] of [[l, 'locum', locum], [p, 'practice_owner', owner]]) {
+    const profileName = type === 'locum' ? 'locum_profiles' : 'practice_owner_profiles';
+    const before = (await db.collection(profileName).doc(u.uid).get()).data();
+    assert.equal(before.verificationStatus, 'approved');
+    assert.equal((await call('/api/applicant/draft', u.token, { requestId: rid(), accountType: type, submittedFields: data })).status, 409);
+    assert.deepEqual((await db.collection(profileName).doc(u.uid).get()).data(), before);
+    const original = await db.collection('verification_submissions').doc(u.uid).collection('revisions').doc(results.find(x => x.uid === u.uid).submissionId).get();
+    assert.equal(original.exists, true);
+  }
+
+  // Pause the next transaction before it starts, allowing the competing request
+  // to commit first. The real Firestore transaction still runs after release.
+  function pauseNextTransaction() {
+    let signal, release;
+    const reached = new Promise(resolve => { signal = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const original = db.runTransaction;
+    db.runTransaction = function (...args) {
+      db.runTransaction = original;
+      signal();
+      return gate.then(() => original.apply(db, args));
+    };
+    return { reached, release };
+  }
+  // Exercise both commit orderings with fresh synthetic applicants.
+  for (const type of ['locum', 'practice_owner']) {
+    for (const operation of ['draft', 'upload', 'finalize']) {
+      for (const firstCommit of ['approval', 'operation']) {
+      const payload = enrollment(type, `race-${randomUUID()}@example.invalid`);
+      const enrolled = await call('/api/enrollment', null, payload); assert.equal(enrolled.status, 200);
+      const u = { uid: enrolled.body.data.uid, token: await tokenAfterCutoff(enrolled.body.data.uid, payload.email) };
+      const firstId = rid();
+      const first = await call('/api/applicant/draft', u.token, { requestId: firstId, accountType: type, submittedFields: fields[type] });
+      assert.equal(first.status, 200);
+      assert.equal((await call('/api/applicant/upload/' + firstId, u.token, Buffer.from('%PDF-race-first'), 'application/pdf')).status, 200);
+      assert.equal((await call('/api/applicant/finalize', u.token, { requestId: firstId })).status, 200);
+      const nextId = rid();
+      let next;
+      if (operation !== 'draft') {
+        next = await call('/api/applicant/draft', u.token, { requestId: nextId, accountType: type, submittedFields: fields[type] });
+        assert.equal(next.status, 200);
+      }
+      if (operation === 'finalize') {
+        assert.equal((await call('/api/applicant/upload/' + nextId, u.token, Buffer.from('%PDF-race-next'), 'application/pdf')).status, 200);
+      }
+      const compete = () => operation === 'draft'
+        ? call('/api/applicant/draft', u.token, { requestId: nextId, accountType: type, submittedFields: fields[type] })
+        : operation === 'upload'
+          ? call('/api/applicant/upload/' + nextId, u.token, Buffer.from('%PDF-race-next'), 'application/pdf')
+          : call('/api/applicant/finalize', u.token, { requestId: nextId });
+      const approve = () => call('/api/verification/review', admin.token, { uid: u.uid, submissionId: first.body.data.submissionId, decision: 'approved' });
+      const pause = pauseNextTransaction();
+      const delayed = firstCommit === 'approval' ? compete() : approve();
+      await pause.reached;
+      let review, attempt;
+      try {
+        if (firstCommit === 'approval') review = await approve();
+        else attempt = await compete();
+      } finally { pause.release(); }
+      if (firstCommit === 'approval') attempt = await delayed;
+      else review = await delayed;
+      assert.equal(attempt.status, firstCommit === 'approval' ? 409 : 200, `${type} ${operation} ${firstCommit}: ${JSON.stringify(attempt)}`);
+      assert.equal(review.status, firstCommit === 'operation' && operation === 'finalize' ? 409 : 200, JSON.stringify(review));
+      const profileName = type === 'locum' ? 'locum_profiles' : 'practice_owner_profiles';
+      const profile = (await db.collection(profileName).doc(u.uid).get()).data();
+      if (review.status === 200) {
+        assert.equal(profile.verificationStatus, 'approved');
+        if (operation === 'finalize') assert.equal(attempt.status, 409);
+        assert.equal((await call('/api/applicant/draft', u.token, { requestId: rid(), accountType: type, submittedFields: fields[type] })).status, 409);
+        if (operation !== 'draft' || attempt.status === 200) {
+          assert.equal((await call('/api/applicant/upload/' + nextId, u.token, Buffer.from('%PDF-race-next'), 'application/pdf')).status, 409);
+          assert.equal((await call('/api/applicant/finalize', u.token, { requestId: nextId })).status, 409);
+        }
+      } else {
+        assert.equal(operation, 'finalize');
+        assert.equal(attempt.status, 200);
+        assert.equal(profile.verificationStatus, 'pending');
+      }
+      assert.equal((await db.collection('verification_submissions').doc(u.uid).collection('revisions').doc(first.body.data.submissionId).get()).exists, true);
+      if (operation === 'upload' && firstCommit === 'approval') {
+        const revision = await db.collection('verification_submissions').doc(u.uid).collection('revisions').doc(next.body.data.submissionId).get();
+        assert.equal(revision.exists, false, 'Rejected upload must not publish a revision');
+        const response = await fetch(`http://${HOST}:${PORT}/api/verification/document?uid=${encodeURIComponent(u.uid)}&submissionId=${next.body.data.submissionId}`, { headers: { origin: ORIGIN, authorization: `Bearer ${admin.token}` } });
+        assert.equal(response.status, 404, 'Uncommitted upload must not be accessible');
+      }
+      }
+    }
+  }
+  for (const type of ['locum', 'practice_owner']) {
+    const payload = enrollment(type, `reject-${randomUUID()}@example.invalid`);
+    const enrolled = await call('/api/enrollment', null, payload); assert.equal(enrolled.status, 200);
+    const uid = enrolled.body.data.uid, token = await tokenAfterCutoff(uid, payload.email), firstId = rid();
+    const first = await call('/api/applicant/draft', token, { requestId: firstId, accountType: type, submittedFields: fields[type] });
+    assert.equal(first.status, 200);
+    assert.equal((await call('/api/applicant/upload/' + firstId, token, Buffer.from('%PDF-rejected'), 'application/pdf')).status, 200);
+    assert.equal((await call('/api/applicant/finalize', token, { requestId: firstId })).status, 200);
+    assert.equal((await call('/api/verification/review', admin.token, { uid, submissionId: first.body.data.submissionId, decision: 'rejected', rejectionReason: 'Correct the details' })).status, 200);
+    const corrected = type === 'locum' ? { ...locum, fullName: 'Corrected Locum' } : { ...owner, clinicName: 'Corrected Clinic' };
+    const secondId = rid();
+    const second = await call('/api/applicant/draft', token, { requestId: secondId, accountType: type, submittedFields: corrected });
+    assert.equal(second.status, 200);
+    assert.equal((await call('/api/applicant/upload/' + secondId, token, Buffer.from('%PDF-corrected'), 'application/pdf')).status, 200);
+    assert.equal((await call('/api/applicant/finalize', token, { requestId: secondId })).status, 200);
+    const revisions = db.collection('verification_submissions').doc(uid).collection('revisions');
+    assert.equal((await revisions.doc(first.body.data.submissionId).get()).data().verificationStatus, 'rejected');
+    assert.equal((await revisions.doc(second.body.data.submissionId).get()).data().verificationStatus, 'pending');
+  }
   const manage = data => manageAccount({ auth, db, actor, data: { uid: l.uid, kind: 'locum', action: 'setDisabled', ...data }, demoPolicy: { accountMutationsEnabled: true } });
   await manage({ disabled: true, expectedDisabled: false });
   assert.equal((await db.collection('account_access').doc(l.uid).get()).data().state, 'disabled');
@@ -210,6 +270,9 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
   await manage({ disabled: false, expectedDisabled: true });
   const enabled = (await db.collection('account_access').doc(l.uid).get()).data();
   assert.equal(enabled.state, 'active'); assert.ok(Number.isInteger(enabled.validAfter));
+  assert.ok([401, 403].includes((await call('/api/applicant/draft', l.token, { requestId: rid(), accountType: 'locum', submittedFields: locum })).status));
+  const freshToken = await tokenAfterCutoff(l.uid, locumEnrollment.email);
+  assert.equal((await call('/api/applicant/draft', freshToken, { requestId: rid(), accountType: 'locum', submittedFields: locum })).status, 409);
   // A failed Auth transition leaves access blocked and can be retried.
   let failed = false;
   const flaky = new Proxy(auth, { get(target, key) { if (key === 'revokeRefreshTokens' && !failed) return async () => { failed = true; throw Error('synthetic failure'); }; const value = target[key]; return typeof value === 'function' ? value.bind(target) : value; } });
@@ -236,9 +299,21 @@ test('isolated applicant HTTP workflow and authorization', { timeout: 120000 }, 
   const locumDb = env.authenticatedContext(rulesLocum, { auth_time: 101 }).firestore();
   const staleDb = env.authenticatedContext(rulesOwner, { auth_time: 100 }).firestore();
   const job = `job-${randomUUID()}`;
+  await assertFails(updateDoc(doc(locumDb, 'locum_profiles', rulesLocum), { phoneNumber: '000' }));
+  await assertFails(updateDoc(doc(ownerDb, 'practice_owner_profiles', rulesOwner), { phoneNumber: '000' }));
+  await assertFails(setDoc(doc(locumDb, 'account_management', rulesLocum), { trustedAccountType: 'practice_owner' }));
+  await db.collection('practice_owner_profiles').doc(rulesOwner).update({ verificationStatus: 'pending' });
+  await assertFails(setDoc(doc(ownerDb, 'job_postings', `${job}-unapproved`), { clinicOwnerId: rulesOwner, status: 'available' }));
+  await db.collection('practice_owner_profiles').doc(rulesOwner).update({ verificationStatus: 'approved' });
+  await db.collection('account_management').doc(rulesOwner).update({ trustedAccountType: 'locum' });
+  await assertFails(setDoc(doc(ownerDb, 'job_postings', `${job}-wrong-type`), { clinicOwnerId: rulesOwner, status: 'available' }));
+  await db.collection('account_management').doc(rulesOwner).update({ trustedAccountType: 'practice_owner' });
   await assertFails(setDoc(doc(staleDb, 'job_postings', `${job}-stale`), { clinicOwnerId: rulesOwner, status: 'available' }));
   await assertSucceeds(setDoc(doc(ownerDb, 'job_postings', job), { clinicOwnerId: rulesOwner, status: 'available' }));
   await assertSucceeds(setDoc(doc(locumDb, 'applications', `${job}_${rulesLocum}`), { jobId: job, locumId: rulesLocum, clinicOwnerId: rulesOwner, status: 'pending', appliedAt: serverTimestamp() }));
+  const deletedJob = `${job}-deleted`;
+  await db.collection('job_postings').doc(deletedJob).set({ clinicOwnerId: rulesOwner, status: 'deleted' });
+  await assertFails(setDoc(doc(locumDb, 'applications', `${deletedJob}_${rulesLocum}`), { jobId: deletedJob, locumId: rulesLocum, clinicOwnerId: rulesOwner, status: 'pending', appliedAt: serverTimestamp() }));
   await assertFails(setDoc(doc(locumDb, 'account_access', rulesLocum), { state: 'active', validAfter: 0 }));
   await db.collection('account_access').doc(rulesOwner).update({ state: 'disabled' });
   await assertFails(setDoc(doc(ownerDb, 'job_postings', `${job}-disabled`), { clinicOwnerId: rulesOwner, status: 'available' }));

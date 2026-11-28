@@ -54,7 +54,7 @@ test('Firestore emulator serializes competing verification decisions', { timeout
   const [review, profile, submission] = await Promise.all([reviewRef.get(), profileRef.get(), submissionRef.get()]);
   assert.equal(review.exists, true);
   assert.equal(review.data().decision, profile.data().verificationStatus);
-  assert.equal(submission.data().verificationStatus, 'pending');
+  assert.equal(submission.data().verificationStatus, review.data().decision);
   assert.equal(submission.data().state, 'submitted');
   // The isolated demo project is disposable; leave seeded records for emulator teardown.
 });
