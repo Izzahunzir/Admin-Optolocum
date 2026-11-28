@@ -1,5 +1,5 @@
 'use strict';
-// Preparation only. No configuration or environment value enables writes.
+// Real verification writes require an explicit operator-selected mode.
 const { validateRealEnvironment } = require('./real_config');
 async function main() {
   try {
@@ -15,9 +15,9 @@ async function main() {
     const { createLocalApp } = require('./local_app');
     const firebase = initializeApp({ projectId: config.projectId, credential: applicationDefault() });
     const app = createLocalApp({ auth: getAuth(firebase), db: getFirestore(firebase), documentStore,
-      realPreparationOnly: true, transport, demoPolicy: Object.freeze({ accountMutationsEnabled: false, jobSoftDeleteEnabled: false }) });
+      realPreparationOnly: true, realVerificationEnabled: config.verificationEnabled, transport, demoPolicy: Object.freeze({ accountMutationsEnabled: false, jobSoftDeleteEnabled: false }) });
     const server = require('node:https').createServer(tlsOptions, app);
-    server.listen(PORT, transport.bind, () => console.log(`Real Firebase preparation HTTPS only: ${transport.bind}:${PORT}`));
+    server.listen(PORT, transport.bind, () => console.log(`Real Firebase ${config.verificationEnabled ? 'verification active' : 'preparation read-only'} HTTPS: ${transport.bind}:${PORT}`));
     server.requestTimeout = 30000; server.headersTimeout = 10000; server.keepAliveTimeout = 5000;
     server.on('error', () => { console.error('Preparation server failed.'); process.exitCode = 1; });
     for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => process.exit(0)));

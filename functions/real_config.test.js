@@ -7,6 +7,8 @@ const base = { OPT_REAL_FIREBASE_MODE: 'prepare-read-only', OPT_REAL_PROJECT: 'o
   GOOGLE_APPLICATION_CREDENTIALS: path.resolve('credential.json'), OPT_DOCUMENT_STORE_ROOT: path.resolve('private') };
 test('real preparation requires explicit consistent configuration and rejects emulator overrides', () => {
   assert.equal(validateRealEnvironment(base, () => true).projectId, 'optolocum-f314e');
+  assert.equal(validateRealEnvironment(base, () => true).verificationEnabled, false);
+  assert.equal(validateRealEnvironment({ ...base, OPT_REAL_FIREBASE_MODE: 'verification-active' }, () => true).verificationEnabled, true);
   for (const change of [{ OPT_REAL_FIREBASE_MODE: '' }, { OPT_REAL_PROJECT: 'other' },
     { FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080' }, { GCLOUD_PROJECT: 'other' },
     { FIREBASE_CONFIG: '{"projectId":"other"}' }, { OPT_DOCUMENT_STORE_ROOT: '' }])

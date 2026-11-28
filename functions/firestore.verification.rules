@@ -1,0 +1,165 @@
+// Verification cutover candidate for the confirmed no-profile-edit scope.
+// Do not deploy without separate approval and reviewed account access records.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return activeSession() && request.auth.token.get('admin', false) == true;
+    }
+    function activeSession() {
+      let access = get(/databases/$(database)/documents/account_access/$(request.auth.uid));
+      return request.auth != null && access != null
+        && access.data.keys().hasAll(['state', 'validAfter'])
+        && access.data.keys().hasOnly(['state', 'validAfter', 'operation'])
+        && access.data.get('operation', null) == null
+        && access.data.get('state', '') == 'active'
+        && access.data.get('validAfter', -1) is int
+        && access.data.validAfter >= 0 && request.auth.token.get('auth_time', 0) is int
+        && request.auth.token.get('auth_time', 0) > access.data.validAfter;
+    }
+    function verifiedType(type, profileCollection) {
+      let assignment = get(/databases/$(database)/documents/account_management/$(request.auth.uid));
+      let profile = get(/databases/$(database)/documents/$(profileCollection)/$(request.auth.uid));
+      return activeSession() && assignment != null && assignment.data.get('trustedAccountType', '') == type
+        && profile != null && profile.data.get('verificationStatus', '') == 'approved';
+    }
+    match /job_postings/{jobId} {
+      function unchangedDeletion() {
+        return resource.data.status != 'deleted' && request.resource.data.status != 'deleted'
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['deletedAt']);
+      }
+      allow read: if activeSession();
+      allow create: if activeSession()
+        && verifiedType('practice_owner', 'practice_owner_profiles')
+        && request.resource.data.clinicOwnerId == request.auth.uid
+        && request.resource.data.status == 'available'
+        && !request.resource.data.keys().hasAny(['deletedAt']);
+      allow update: if activeSession()
+        && (isAdmin() || (resource.data.clinicOwnerId == request.auth.uid
+          && request.resource.data.clinicOwnerId == resource.data.clinicOwnerId))
+        && unchangedDeletion();
+      allow delete: if false;
+    }
+    match /applications/{applicationId} {
+      allow create: if activeSession()
+        && verifiedType('locum', 'locum_profiles')
+        && request.resource.data.locumId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly([
+          'jobId', 'locumId', 'clinicOwnerId', 'status', 'appliedAt'
+        ])
+        && request.resource.data.jobId is string
+        && request.resource.data.clinicOwnerId is string
+        && applicationId == request.resource.data.jobId + '_' + request.auth.uid
+        && exists(/databases/$(database)/documents/job_postings/$(request.resource.data.jobId))
+        && get(/databases/$(database)/documents/job_postings/$(request.resource.data.jobId)).data.status == 'available'
+        && get(/databases/$(database)/documents/job_postings/$(request.resource.data.jobId)).data.clinicOwnerId == request.resource.data.clinicOwnerId
+        && request.resource.data.clinicOwnerId != request.auth.uid
+        && request.resource.data.appliedAt == request.time;
+      allow get: if activeSession()
+        && (applicationId.matches('.*_' + request.auth.uid)
+          || (resource != null && resource.data.clinicOwnerId == request.auth.uid));
+      allow list: if activeSession()
+        && (resource.data.locumId == request.auth.uid || resource.data.clinicOwnerId == request.auth.uid);
+      allow update: if activeSession()
+        && resource.data.clinicOwnerId == request.auth.uid
+        && ((resource.data.status == 'pending' && request.resource.data.status in ['hired', 'rejected'])
+          || (resource.data.status == 'hired' && request.resource.data.status == 'completed'))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+        && exists(/databases/$(database)/documents/job_postings/$(resource.data.jobId))
+        && get(/databases/$(database)/documents/job_postings/$(resource.data.jobId)).data.clinicOwnerId == request.auth.uid;
+      allow delete: if false;
+      allow get, list: if isAdmin();
+    }
+    match /locum_profiles/{locumId} {
+      allow get: if activeSession() && request.auth.uid == locumId;
+      allow list: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+      allow get, list: if isAdmin();
+    }
+    match /application_applicant_summaries/{applicationId} {
+      function applicationDocument() {
+        return get(/databases/$(database)/documents/applications/$(applicationId));
+      }
+      function jobBelongsToOwner(jobId, ownerId) {
+        let job = get(/databases/$(database)/documents/job_postings/$(jobId));
+        return job != null && job.data.get('clinicOwnerId', '') == ownerId;
+      }
+      function validRelationship(app) {
+        return app.keys().hasAll(['jobId', 'locumId', 'clinicOwnerId'])
+          && app.jobId is string && app.jobId.matches('^[^/]+$')
+          && app.locumId is string && app.locumId.matches('^[^/]+$')
+          && app.clinicOwnerId is string && app.clinicOwnerId.size() > 0
+          && applicationId == app.jobId + '_' + app.locumId
+          && app.locumId != app.clinicOwnerId
+          && jobBelongsToOwner(app.jobId, app.clinicOwnerId);
+      }
+      function validSummary(data) {
+        return data.keys().hasAll(['fullName', 'highestEducation', 'course'])
+          && data.keys().hasOnly(['fullName', 'highestEducation', 'course', 'verificationStatus'])
+          && data.fullName is string && data.highestEducation is string && data.course is string
+          && (!data.keys().hasAny(['verificationStatus'])
+            || (data.verificationStatus is string
+              && data.get('verificationStatus', 'unverified') in ['unverified', 'pending', 'verified']));
+      }
+      function profileText(profile, key) {
+        return profile.get(key, '') is string ? profile.get(key, '') : '';
+      }
+      function matchesOwnProfile() {
+        let profile = get(/databases/$(database)/documents/locum_profiles/$(request.auth.uid));
+        return profile != null
+          && request.resource.data.fullName == profileText(profile.data, 'fullName')
+          && request.resource.data.highestEducation == profileText(profile.data, 'highestEducation')
+          && request.resource.data.course == profileText(profile.data, 'course')
+          && (!request.resource.data.keys().hasAny(['verificationStatus'])
+            || request.resource.data.verificationStatus == summaryStatus(profile.data));
+      }
+      function summaryStatus(profile) {
+        return profile.get('verificationStatus', 'unverified') == 'approved' ? 'verified'
+          : profile.get('verificationStatus', 'unverified') == 'pending' ? 'pending' : 'unverified';
+      }
+      function canPublishOwnSummary() {
+        let app = applicationDocument();
+        return app != null && validRelationship(app.data)
+          && app.data.locumId == request.auth.uid
+          && validSummary(request.resource.data) && matchesOwnProfile();
+      }
+      function canReadApplicantSummary() {
+        let app = applicationDocument();
+        return app != null && validRelationship(app.data) && app.data.clinicOwnerId == request.auth.uid;
+      }
+      allow get: if activeSession() && canReadApplicantSummary()
+        && (resource == null || validSummary(resource.data));
+      allow create, update: if activeSession() && canPublishOwnSummary();
+      allow list, delete: if false;
+      allow get, list: if isAdmin();
+    }
+    // Assignment and verification records may only be changed by a trusted
+    // server using the Admin SDK. This fixture is not an IAM policy.
+    match /account_management/{uid} {
+      allow get: if activeSession() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow write: if false;
+    }
+    match /registration_intents/{document=**} { allow read, write: if false; }
+    match /account_access/{document=**} { allow read, write: if false; }
+    match /verification_upload_drafts/{document=**} { allow read, write: if false; }
+    match /verification_submissions/{uid}/{document=**} {
+      allow read: if activeSession() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+    match /verification_reviews/{uid}/{document=**} {
+      allow read: if activeSession() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+    match /practice_owner_profiles/{ownerId} {
+      allow get: if activeSession() && request.auth.uid == ownerId;
+      allow create: if false;
+      allow get, list: if isAdmin();
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}
