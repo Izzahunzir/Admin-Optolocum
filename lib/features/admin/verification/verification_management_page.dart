@@ -243,23 +243,41 @@ class _VerificationManagementPageState
       if (mounted) await _loadSubmission(submission, resetHistory: true);
     } on VerificationException catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error.message)));
+      if (error.code == 'unauthenticated' || error.code == 'http-401') {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Administrator sign-in required'),
+            content: const Text(
+              'Your review was not saved. Sign out and sign in again, then retry the review.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
       // The backend is authoritative; refresh details after stale or duplicate
       // review errors so the screen reflects the current revision state.
-      await _loadSubmission(submission, resetHistory: true);
-   } catch (error, stackTrace) {
-  debugPrint('VERIFICATION REVIEW ERROR: $error');
-  debugPrint('VERIFICATION REVIEW STACK: $stackTrace');
+      if (mounted) await _loadSubmission(submission, resetHistory: true);
+    } catch (error, stackTrace) {
+      debugPrint('VERIFICATION REVIEW ERROR: $error');
+      debugPrint('VERIFICATION REVIEW STACK: $stackTrace');
 
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text('Review error: $error'),
-      duration: const Duration(seconds: 8),
-    ),
-  );
-} finally {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Review error: $error'),
+          duration: const Duration(seconds: 8),
+        ),
+      );
+    } finally {
       if (mounted) setState(() => _reviewing = false);
     }
   }

@@ -111,6 +111,7 @@ class AccountVerificationTable extends StatelessWidget {
               ),
               row('Verified', a.verified, b.verified),
               row('Pending', a.pending, b.pending),
+              row('Rejected', a.rejected, b.rejected),
               row('Unverified', a.unverified, b.unverified),
               row('Unknown', a.unknown, b.unknown),
               row('Other', a.other, b.other),

@@ -14,6 +14,7 @@ void main() {
       4,
       false,
       'verified',
+      'approved',
       'pending',
       'unverified',
       'unexpected',
@@ -39,6 +40,7 @@ void main() {
   test('exact categories reconcile with total without coercing values', () {
     final stats = VerificationStatistics([
       'verified',
+      'approved',
       'pending',
       'unverified',
       null,
@@ -50,13 +52,14 @@ void main() {
       'Verified',
       ' verified ',
     ]);
-    expect(stats.verified, 1);
+    expect(stats.verified, 2);
     expect(stats.pending, 1);
+    expect(stats.rejected, 1);
     expect(stats.unverified, 1);
     expect(stats.unknown, 5);
-    expect(stats.other, 3);
-    expect(stats.total, 11);
-    expect(stats.verifiedFraction, closeTo(1 / 11, .00001));
+    expect(stats.other, 2);
+    expect(stats.total, 12);
+    expect(stats.verifiedFraction, closeTo(2 / 12, .00001));
   });
 
   test('percentage includes unknown and other profiles in denominator', () {
@@ -91,7 +94,7 @@ void main() {
         ),
       );
       final table = tester.widget<Table>(find.byType(Table));
-      expect(table.children.length, 7);
+      expect(table.children.length, 8);
       expect(find.text('Locums'), findsOneWidget);
       expect(find.text('Practice Owners'), findsOneWidget);
       expect(find.text('Total profiles'), findsOneWidget);
@@ -123,20 +126,20 @@ void main() {
         VerificationColumnData(statuses: ['verified']),
       );
       expect(find.text('Loading…'), findsOneWidget);
-      expect(find.text('—'), findsNWidgets(6));
+      expect(find.text('—'), findsNWidgets(7));
       expect(find.text('1'), findsNWidgets(2));
       await render(
         VerificationColumnData(statuses: [], errorMessage: 'Access denied'),
         VerificationColumnData(statuses: []),
       );
       expect(find.textContaining('Access denied'), findsOneWidget);
-      expect(find.text('0'), findsNWidgets(6));
+      expect(find.text('0'), findsNWidgets(7));
       await render(
         VerificationColumnData(statuses: [], fromCache: true),
         VerificationColumnData(statuses: ['pending'], fromCache: true),
       );
       expect(find.text('Cached counts may be incomplete.'), findsOneWidget);
-      expect(find.text('—'), findsNWidgets(6));
+      expect(find.text('—'), findsNWidgets(7));
       expect(tester.takeException(), isNull);
     },
   );

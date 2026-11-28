@@ -57,6 +57,121 @@ Map<String, dynamic> _submission({
 };
 
 void main() {
+  testWidgets('reject confirmation invokes review API', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final item = _submission();
+    Map<String, dynamic>? review;
+    final service = VerificationService(
+      callable: (name, data) async {
+        if (name == 'listPendingVerificationSubmissions')
+          return {
+            'items': [item],
+          };
+        if (name == 'getVerificationSubmission')
+          return {
+            'submission': item,
+            'history': [item],
+            'historyHasMore': false,
+          };
+        if (name == 'reviewVerificationSubmission') {
+          review = data;
+          return data;
+        }
+        throw StateError('Unexpected callable');
+      },
+      tokenProvider: () async => 'test-token',
+      backend: const BackendEndpoint(baseUrl: 'https://backend.example'),
+      httpClient: MockClient(
+        (_) async => http.Response.bytes(
+          [37, 80, 68, 70, 45],
+          200,
+          headers: {'content-type': 'application/pdf'},
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: VerificationManagementPage(service: service),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('View Details'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Reject'));
+    await tester.tap(find.text('Reject'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), 'Synthetic reason');
+    await tester.tap(find.text('Reject').last);
+    await tester.pumpAndSettle();
+    expect(review?['decision'], 'rejected');
+    expect(review?['rejectionReason'], 'Synthetic reason');
+  });
+  testWidgets('unauthenticated review tells admin to sign in again', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final item = _submission();
+    final service = VerificationService(
+      callable: (name, data) async {
+        if (name == 'listPendingVerificationSubmissions')
+          return {
+            'items': [item],
+          };
+        if (name == 'getVerificationSubmission')
+          return {
+            'submission': item,
+            'history': [item],
+            'historyHasMore': false,
+          };
+        if (name == 'reviewVerificationSubmission')
+          throw const VerificationException(
+            'unauthenticated',
+            'Sign in again.',
+          );
+        throw StateError('Unexpected callable');
+      },
+      tokenProvider: () async => 'test-token',
+      backend: const BackendEndpoint(baseUrl: 'https://backend.example'),
+      httpClient: MockClient(
+        (_) async => http.Response.bytes(
+          [37, 80, 68, 70, 45],
+          200,
+          headers: {'content-type': 'application/pdf'},
+        ),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: VerificationManagementPage(service: service),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('View Details'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Reject'));
+    await tester.tap(find.text('Reject'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), 'Synthetic reason');
+    await tester.tap(find.text('Reject').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Administrator sign-in required'), findsOneWidget);
+    expect(find.textContaining('Your review was not saved'), findsOneWidget);
+  });
   group('VerificationSubmission', () {
     test('maps queue entries whose backend omits redundant status fields', () {
       final raw = _submission()
